@@ -93,6 +93,10 @@ async function whoIs(request, env) {
     if (row) await env.DB.prepare('DELETE FROM auth_fails WHERE ip = ?1').bind(ip).run();
     return { email: 'owner' };
   }
+  if (!String(env.TEAM_DOMAIN || '').trim() && !String(env.POLICY_AUD || '').trim()) {
+    const seen = Object.keys(env).filter(k => k !== 'ASSETS').sort();
+    return { error: `No APP_KEY found. Settings this deployment can see: ${seen.length ? seen.join(', ') : 'none'}. Address used: ${new URL(request.url).host}.`, status: 500 };
+  }
   return verifyAccess(request, env);
 }
 
