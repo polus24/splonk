@@ -324,7 +324,7 @@ const Cloud = {
   async api(path, opts = {}) {
     const k = this.key();
     const res = await fetch('/api/' + path, { credentials: 'same-origin', cache: 'no-store', redirect: 'manual', ...opts, headers: { 'content-type': 'application/json', ...(k ? { 'X-Splonk-Key': k } : {}), ...(opts.headers || {}) } });
-    if (res.type === 'opaqueredirect' || res.status === 401 || res.status === 403) {
+    if (res.type === 'opaqueredirect' || res.status === 401 || res.status === 403 || res.status === 429) {
       let code = ''; try { code = (await res.clone().json()).code || ''; } catch (x) {}
       const e = new Error('signed out'); e.auth = true; e.code = code; throw e;
     }
@@ -345,7 +345,7 @@ const Cloud = {
     let me;
     try { me = await this.api('me'); }
     catch (e) {
-      if (e.auth && (e.code === 'key_required' || e.code === 'key_wrong')) { this.on = true; this.authLost = true; this.keyMode = true; this.status(); this.bind(); this.askKey(e.code === 'key_wrong'); return true; }
+      if (e.auth && ['key_required', 'key_wrong', 'too_many'].includes(e.code)) { this.on = true; this.authLost = true; this.keyMode = true; this.status(); this.bind(); this.askKey(e.code); return true; }
       if (e.auth) { this.on = true; this.authLost = true; this.status(); this.bind(); return true; }
       return false;
     }
@@ -374,18 +374,18 @@ const Cloud = {
     document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { this.pull(); this.flush(); } });
     setInterval(() => { if (document.visibilityState === 'visible') { this.pull(); if (this.pending.size) this.flush(); } }, 45000);
     $('#sync').style.cursor = 'pointer';
-    $('#sync').addEventListener('click', () => { if (this.authLost) { if (this.keyMode) this.askKey(false); else location.reload(); } else { this.flush(); this.pull(); } });
+    $('#sync').addEventListener('click', () => { if (this.authLost) { if (this.keyMode) this.askKey(''); else location.reload(); } else { this.flush(); this.pull(); } });
   },
   handleError(e) {
-    if (e && e.auth) { this.authLost = true; if (e.code === 'key_required' || e.code === 'key_wrong') this.keyMode = true; }
+    if (e && e.auth) { this.authLost = true; if (['key_required', 'key_wrong', 'too_many'].includes(e.code)) this.keyMode = true; }
     this.status();
   },
-  askKey(wrong) {
+  askKey(why) {
     if (document.querySelector('#keyIn')) return;
     const m = openSheet(`<div class="hd"><h2>Unlock Splonk</h2><button class="x" data-close>×</button></div>
-      <p style="margin-top:0">Enter the private key you saved in Cloudflare as <b>APP_KEY</b>. You only need to do this once on each phone.</p>
-      ${wrong ? '<p class="sihint" style="margin-top:0">That key didn’t match. Check it and try again.</p>' : ''}
-      <label class="f">Private key<input id="keyIn" type="password" autocomplete="current-password" autocapitalize="off" spellcheck="false"></label>
+      <p style="margin-top:0">Enter the key or PIN you saved in Cloudflare as <b>APP_KEY</b>. You only need to do this once on each phone.</p>
+      ${why === 'key_wrong' ? '<p class="sihint" style="margin-top:0">That didn’t match. Check it and try again.</p>' : why === 'too_many' ? '<p class="sihint" style="margin-top:0">Too many wrong tries. Wait 15 minutes, then try again.</p>' : ''}
+      <label class="f">Key or PIN<input id="keyIn" type="password" inputmode="text" autocomplete="current-password" autocapitalize="off" spellcheck="false"></label>
       <button class="btn primary block" id="keyGo">Unlock</button>
       <p class="tiny muted">Until you unlock, anything you record is saved on this phone and uploads once you do.</p>`);
     const go = async () => {
