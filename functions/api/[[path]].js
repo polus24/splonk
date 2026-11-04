@@ -4,9 +4,12 @@
 // every query is filtered by that address, so nobody can read or change anyone else's data.
 //
 // Needs (Pages project → Settings):
-//   D1 binding:            DB            → your "splonk" D1 database
-//   Environment variables: TEAM_DOMAIN   → https://<your-team>.cloudflareaccess.com
-//                          POLICY_AUD    → the Access application's AUD tag
+//   D1 binding:  DB → your "splonk" D1 database
+//   Then ONE of these ways to lock it:
+//   - Single user:  secret APP_KEY → a private key or PIN (4+ characters) you enter once in the app.
+//                   After 10 wrong tries from one connection, tries are refused for 15 minutes.
+//   - Several users (Cloudflare Access): TEAM_DOMAIN → https://<team>.cloudflareaccess.com
+//                                        POLICY_AUD  → the Access application's AUD tag
 
 const MAX_DOC_BYTES = 400 * 1024;
 const KEY_RE = /^(settings|active|[rcbv]_[A-Za-z0-9_.:@+~-]{1,100})$/;
@@ -58,6 +61,41 @@ export async function verifyAccess(request, env) {
   return { email };
 }
 
+/* ---------- Single-user private key ---------- */
+function sameText(a, b) {
+  const x = new TextEncoder().encode(a), y = new TextEncoder().encode(b);
+  let diff = x.length ^ y.length;
+  for (let i = 0; i < Math.max(x.length, y.length); i++) diff |= (x[i] || 0) ^ (y[i] || 0);
+  return diff === 0;
+}
+const MAX_TRIES = 10, LOCK_MS = 15 * 60 * 1000;
+async function triesTable(env) {
+  await env.DB.prepare('CREATE TABLE IF NOT EXISTS auth_fails (ip TEXT PRIMARY KEY, count INTEGER NOT NULL, first_at INTEGER NOT NULL)').run();
+}
+async function whoIs(request, env) {
+  const appKey = String(env.APP_KEY || '').trim();
+  if (appKey) {
+    if (appKey.length < 4) return { error: 'APP_KEY is too short: use at least 4 characters.', status: 500 };
+    const given = (request.headers.get('X-Splonk-Key') || '').trim();
+    if (!given) return { error: 'Key required', code: 'key_required', status: 401 };
+    if (!env.DB) return { error: 'Server not set up yet: add the D1 binding named DB.', status: 500 };
+    const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
+    const now = Date.now();
+    await triesTable(env);
+    const row = (await env.DB.prepare('SELECT count, first_at FROM auth_fails WHERE ip = ?1').bind(ip).all()).results[0];
+    const fresh = row && now - row.first_at < LOCK_MS;
+    if (fresh && row.count >= MAX_TRIES) return { error: 'Too many wrong tries. Wait 15 minutes and try again.', code: 'too_many', status: 429 };
+    if (!sameText(given, appKey)) {
+      if (fresh) await env.DB.prepare('UPDATE auth_fails SET count = count + 1 WHERE ip = ?1').bind(ip).run();
+      else await env.DB.prepare('INSERT INTO auth_fails (ip, count, first_at) VALUES (?1, 1, ?2) ON CONFLICT(ip) DO UPDATE SET count = 1, first_at = excluded.first_at').bind(ip, now).run();
+      return { error: 'Wrong key', code: 'key_wrong', status: 401 };
+    }
+    if (row) await env.DB.prepare('DELETE FROM auth_fails WHERE ip = ?1').bind(ip).run();
+    return { email: 'owner' };
+  }
+  return verifyAccess(request, env);
+}
+
 /* ---------- API ---------- */
 async function readBody(request) {
   const text = await request.text();
@@ -68,8 +106,8 @@ async function readBody(request) {
 export async function onRequest(context) {
   const { request, env, params } = context;
   try {
-    const who = await verifyAccess(request, env);
-    if (who.error) return json({ error: who.error }, who.status);
+    const who = await whoIs(request, env);
+    if (who.error) return json({ error: who.error, code: who.code }, who.status);
     const user = who.email;
     if (!env.DB) return json({ error: 'Server not set up yet: add the D1 binding named DB.' }, 500);
     const path = [].concat(params.path || []);
