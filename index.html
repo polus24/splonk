@@ -252,7 +252,7 @@ const Store = {
   cache() { try { localStorage.setItem('fairway.docs', JSON.stringify(this.docs)); } catch (e) {} },
   async connect() {
     const [db, user] = await Promise.all([claudeUse('db'), claudeUse('user')]);
-    if (!db || !user) { setSync('Saved on this device'); return; }
+    if (!db || !user) { if (!(await Cloud.connect())) setSync('Saved on this device'); return; }
     const id = await user.id();
     if (!id) { setSync('Saved on this device'); return; }
     try { this.col = db.collection('data/users/' + id); } catch (e) { return; }
@@ -276,6 +276,7 @@ const Store = {
   },
   put(key, data, debounce) {
     this.docs[key] = data; this.cache(); this.lastSig = '';
+    if (Cloud.on) return Cloud.mark(key, debounce);
     if (!this.col) return;
     this.dirty.add(key);
     clearTimeout(this.timers[key]);
@@ -284,6 +285,7 @@ const Store = {
   },
   del(key) {
     delete this.docs[key]; this.cache(); this.lastSig = '';
+    if (Cloud.on) return Cloud.mark(key, false);
     if (!this.col) return;
     this.dirty.add(key); clearTimeout(this.timers[key]);
     this._enqueue(key, null);
@@ -305,6 +307,109 @@ const Store = {
     }
     q.running = false;
     this.dirty.delete(key);
+  }
+};
+
+/* =========================================================
+   Cloudflare sync (self-hosted version): /api on the same site,
+   signed in with Cloudflare Access. A copy stays on the phone, changes
+   queue while offline and upload when back online.
+   ========================================================= */
+const Cloud = {
+  on: false, email: null, since: 0, pending: new Set(), timer: null, flushing: false, pulling: false, authLost: false,
+  lsGet(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
+  lsSet(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} },
+  savePending() { this.lsSet('splonk.pending', [...this.pending]); },
+  async api(path, opts = {}) {
+    const res = await fetch('/api/' + path, { credentials: 'same-origin', cache: 'no-store', redirect: 'manual', ...opts, headers: { 'content-type': 'application/json', ...(opts.headers || {}) } });
+    if (res.type === 'opaqueredirect' || res.status === 401 || res.status === 403) { const e = new Error('signed out'); e.auth = true; throw e; }
+    const ct = res.headers.get('content-type') || '';
+    if (!ct.includes('json')) { const e = new Error('no api'); e.noApi = true; throw e; }
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || ('HTTP ' + res.status));
+    return body;
+  },
+  status() {
+    if (this.authLost) return setSync('Signed out — tap to sign in', 'warn');
+    if (!navigator.onLine) return setSync(this.pending.size ? 'Offline — saved on phone' : 'Offline', 'warn');
+    if (this.pending.size) return setSync('Saving…');
+    setSync('Synced', 'ok');
+  },
+  async connect() {
+    if (location.protocol === 'file:') return false;
+    let me;
+    try { me = await this.api('me'); } catch (e) { if (e.auth) { this.on = true; this.authLost = true; this.status(); this.bind(); return true; } return false; }
+    this.on = true; this.email = me.email;
+    this.pending = new Set(this.lsGet('splonk.pending', []));
+    this.bind();
+    setSync('Syncing…');
+    try {
+      const prevUser = this.lsGet('splonk.cloudUser', null);
+      if (!prevUser && Object.keys(Store.docs).length) {
+        await this.api('import', { method: 'POST', body: JSON.stringify({ docs: Store.docs }) });
+      } else if (prevUser && prevUser !== this.email) {
+        Store.docs = {}; this.pending.clear(); this.savePending();
+      }
+      this.lsSet('splonk.cloudUser', this.email);
+      await this.pull(true);
+      await this.flush();
+    } catch (e) { this.handleError(e); }
+    return true;
+  },
+  bind() {
+    if (this.bound) return; this.bound = true;
+    window.addEventListener('online', () => { this.flush(); this.pull(); });
+    window.addEventListener('offline', () => this.status());
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { this.pull(); this.flush(); } });
+    setInterval(() => { if (document.visibilityState === 'visible') { this.pull(); if (this.pending.size) this.flush(); } }, 45000);
+    $('#sync').style.cursor = 'pointer';
+    $('#sync').addEventListener('click', () => { if (this.authLost) location.reload(); else { this.flush(); this.pull(); } });
+  },
+  handleError(e) {
+    if (e && e.auth) { this.authLost = true; }
+    this.status();
+  },
+  mark(key, debounce) {
+    this.pending.add(key); this.savePending(); this.status();
+    clearTimeout(this.timer);
+    this.timer = setTimeout(() => this.flush(), debounce ? 900 : 50);
+  },
+  async flush() {
+    if (!this.on || this.flushing || this.authLost || !navigator.onLine) { this.status(); return; }
+    this.flushing = true;
+    try {
+      while (this.pending.size) {
+        const key = this.pending.values().next().value;
+        const data = Store.docs[key];
+        if (data === undefined) await this.api('docs/' + encodeURIComponent(key), { method: 'DELETE' });
+        else await this.api('docs/' + encodeURIComponent(key), { method: 'PUT', body: JSON.stringify({ data }) });
+        if (Store.docs[key] === data) { this.pending.delete(key); this.savePending(); }
+      }
+    } catch (e) { this.handleError(e); }
+    this.flushing = false;
+    this.status();
+  },
+  async pull(full) {
+    if (!this.on || this.pulling || this.authLost || !navigator.onLine) return;
+    this.pulling = true;
+    try {
+      const since = full ? 0 : this.since;
+      const res = await this.api('docs?since=' + since);
+      let next;
+      if (full) {
+        next = {};
+        for (const d of res.docs) if (!d.deleted) next[d.key] = d.data;
+        for (const k of this.pending) { if (k in Store.docs) next[k] = Store.docs[k]; else delete next[k]; }
+      } else {
+        next = { ...Store.docs };
+        for (const d of res.docs) { if (this.pending.has(d.key)) continue; if (d.deleted) delete next[d.key]; else next[d.key] = d.data; }
+      }
+      this.since = res.latest || since;
+      const sig = JSON.stringify(next);
+      if (sig !== JSON.stringify(Store.docs)) { Store.docs = next; Store.cache(); hydrate(); if (!document.querySelector('.ov')) render(); }
+    } catch (e) { this.handleError(e); }
+    this.pulling = false;
+    this.status();
   }
 };
 
@@ -1314,9 +1419,10 @@ $('#gear').onclick = () => {
     <label class="f">Official GA Handicap (from the Golf Australia app)<input id="gOff" type="number" step="0.1" value="${s.officialHcp ?? ''}" placeholder="optional"></label>
     <label class="check"><input type="checkbox" id="gUse" ${s.useOfficial ? 'checked' : ''}> Use my official handicap for Daily Handicap and points</label>
     <p class="tiny muted">Until you've entered about 20 rounds here, your official handicap is more accurate than the calculated one. Leave this on until then.</p>
+    ${Cloud.on && Cloud.email ? `<h3 style="margin-top:18px">Account</h3><p class="small" style="margin:0 0 8px">Signed in as <b>${esc(Cloud.email)}</b>. Your rounds, courses and bag are saved to the cloud, with a copy on this phone for when there's no signal.</p><div class="row wrap" style="margin-bottom:6px"><a class="btn sm" href="/api/export" download>Download backup file</a></div>` : ''}
     <h3 style="margin-top:18px">Backup</h3>
     <div class="row wrap"><button class="btn sm" id="gCopy">Copy backup</button><button class="btn sm" id="gImp">Restore from backup</button></div>
-    <p class="tiny muted">Your data syncs to your Claude account. Videos stored "on this device only" aren't included in backups.</p>
+    <p class="tiny muted">Copy backup copies everything except swing videos saved on this device.</p>
     <button class="btn primary block" id="gSave" style="margin-top:12px">Save</button>`);
   const el = m.el;
   $('#gSave', el).onclick = () => { S.settings = { ...s, name: $('#gName', el).value.trim(), gender: $('#gG', el).value, officialHcp: num($('#gOff', el).value), useOfficial: $('#gUse', el).checked }; saveSettings(); m.close(); render(); };
