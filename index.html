@@ -131,6 +131,9 @@ label.f textarea{min-height:70px;resize:vertical}
 .player{display:flex;align-items:center;gap:12px;margin:8px 4px 0}
 .player .av{width:46px;height:46px;border-radius:50%;background:var(--flag);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:17px;font-stretch:85%}
 .player .pn{font-weight:700;font-size:18px;letter-spacing:-.01em}
+.hole-edit{position:absolute;top:14px;right:14px;display:inline-flex;align-items:center;gap:6px;border:0;background:rgba(255,255,255,.16);color:#fff;font:inherit;font-size:13px;font-weight:600;padding:7px 11px;border-radius:99px;cursor:pointer;min-height:34px}
+.hole-edit:hover{background:rgba(255,255,255,.26)}
+.band .hole-art{margin-top:30px}
 /* course picker */
 .cp-box{background:var(--surface2);border-radius:14px;padding:8px}
 .cp-in{display:flex;align-items:center;gap:8px;background:var(--surface);border:1px solid var(--line);border-radius:11px;padding:0 10px;color:var(--muted)}
@@ -564,7 +567,7 @@ function ratingFor(course, format) {
   return { scratch: approx ? (num(course.scratch) != null ? r1(num(course.scratch) / 2) : null) : num(r.scratch), slope: approx ? num(course.slope) : num(r.slope), par, nine: true, approx };
 }
 function playedHoles(course, format) {
-  const all = course.holes.map((h, i) => ({ n: i + 1, par: +h.par, si: +h.si }));
+  const all = course.holes.map((h, i) => ({ n: i + 1, par: +h.par, si: +h.si, m: num(h.m) }));
   const list = format === 'front' ? all.slice(0, 9) : format === 'back' ? all.slice(9, 18) : all;
   const order = list.slice().sort((a, b) => a.si - b.si);
   order.forEach((h, i) => h.rank = i + 1);
@@ -883,7 +886,8 @@ function renderLive(v) {
   <div class="holes" id="holes">${r.holes.map((x, i) => `<button data-i="${i}" class="${i === r.cur ? 'cur' : (x.strokes != null || x.pickup) ? 'done' : ''}">${x.n}</button>`).join('')}</div>
   <div class="band">
     <div class="hole-top"><div><div class="lbl">Hole</div><div class="hno">${h.n}</div></div>${holeArt(h)}</div>
-    <div class="hole-meta"><span>Par <b>${h.par}</b></span><span>Index <b>${h.si}</b></span><span>${recv > 0 ? `${recv} shot${recv > 1 ? 's' : ''} <span class="dots">${'<i></i>'.repeat(recv)}</span>` : recv < 0 ? `Give back ${-recv}` : 'No shots here'}</span></div>
+    <button class="hole-edit" id="editHole" aria-label="Edit hole ${h.n} details"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>Edit hole</button>
+    <div class="hole-meta"><span>Par <b>${h.par}</b></span><span>Index <b>${h.si}</b></span>${h.m ? `<span><b>${h.m}</b> m</span>` : ''}<span>${recv > 0 ? `${recv} shot${recv > 1 ? 's' : ''} <span class="dots">${'<i></i>'.repeat(recv)}</span>` : recv < 0 ? `Give back ${-recv}` : 'No shots here'}</span></div>
   </div>
   <div class="card" style="padding:4px 16px">
     <div class="stepper"><div class="lab">Strokes<small>${h.pickup ? 'Picked up' : h.strokes != null ? scoreName(h.strokes - h.par) + ' · ' + pointsOn(h, r.dh, n) + ' pts' : 'Tap + to start at par'}</small></div><div class="ctl"><button data-a="s-">−</button><div class="val ${ringClass(h)}">${h.pickup ? 'P' : h.strokes ?? '–'}</div><button data-a="s+">+</button></div></div>
@@ -921,6 +925,7 @@ function renderLive(v) {
   const nx = $('#next'); if (nx) nx.onclick = () => updateActive(r => r.cur = Math.min(n - 1, r.cur + 1));
   const fin = () => finishRound(); const f1b = $('#finish'); if (f1b) f1b.onclick = fin; $('#finish2').onclick = fin;
   $('#card').onclick = () => scorecardSheet(r);
+  $('#editHole').onclick = () => editHoleSheet();
   $('#abandon').onclick = async () => { if (await confirmBox('Abandon this round? Nothing will be saved.', { ok: 'Abandon', danger: true })) { S.active = null; Store.del('active'); render(); } };
 }
 const scoreName = d => d <= -3 ? 'Albatross' : d === -2 ? 'Eagle' : d === -1 ? 'Birdie' : d === 0 ? 'Par' : d === 1 ? 'Bogey' : d === 2 ? 'Double bogey' : d === 3 ? 'Triple bogey' : '+' + d;
@@ -935,6 +940,47 @@ function holeArt(h) {
   const green = `<ellipse cx="${gx}" cy="${gy}" rx="17" ry="12" fill="rgba(255,255,255,.42)"/>`;
   const flag = `<path d="M${gx} ${gy + 2}V${gy - 20}" stroke="#fff" stroke-width="1.6"/><path d="M${gx + .8} ${gy - 20} l11 4 -11 4z" fill="var(--flag)"/><circle cx="${gx}" cy="${gy + 2}" r="1.6" fill="#fff"/>`;
   return `<svg class="hole-art" viewBox="0 0 150 118" aria-hidden="true">${fair}${bunk}${green}${flag}${tee}</svg>`;
+}
+function editHoleSheet() {
+  const r = S.active, h = r.holes[r.cur];
+  const course = r.course && r.course.id ? findCourse(r.course.id) : null;
+  let par = h.par;
+  const m = openSheet(`<div class="hd"><h2>Hole ${h.n} details</h2><button class="x" data-close>×</button></div>
+    <div class="tiny" style="color:var(--ink2);font-weight:500;margin:0 0 4px">Par</div>
+    <div class="seg" id="ehPar" style="margin-bottom:14px">${[3, 4, 5, 6].map(p => `<button data-p="${p}" class="${p === par ? 'on' : ''}">${p}</button>`).join('')}</div>
+    <div class="grid2"><label class="f">Stroke index<input id="ehSi" type="number" inputmode="numeric" min="1" max="18" value="${h.si}"></label>
+    <label class="f">Length (m)<input id="ehM" type="number" inputmode="numeric" min="40" max="700" value="${h.m ?? ''}" placeholder="optional"></label></div>
+    <p class="tiny muted" id="ehNote" style="margin:-4px 2px 10px"></p>
+    ${course ? `<label class="check"><input type="checkbox" id="ehSave" checked> Also fix it on the course for future rounds</label>` : ''}
+    <button class="btn primary block" id="ehGo">Save hole</button>`);
+  const el = m.el;
+  $$('#ehPar button', el).forEach(b => b.onclick = () => { par = +b.dataset.p; $$('#ehPar button', el).forEach(x => x.classList.toggle('on', x === b)); });
+  const note = () => { const v = +$('#ehSi', el).value; const other = (course ? course.holes.map((x, i) => ({ n: i + 1, si: +x.si })) : r.holes).find(x => x.n !== h.n && +x.si === v); $('#ehNote', el).textContent = v && v !== h.si && other ? `Hole ${other.n} currently has index ${v}. It will swap to index ${h.si}.` : ''; };
+  $('#ehSi', el).oninput = note; note();
+  $('#ehGo', el).onclick = () => {
+    const si = Math.round(+$('#ehSi', el).value), len = num($('#ehM', el).value);
+    if (!(si >= 1 && si <= 18)) { toast('Stroke index must be between 1 and 18.'); return; }
+    const oldSi = h.si;
+    updateActive(r => {
+      const hh = r.holes[r.cur];
+      if (si !== oldSi) { const o = r.holes.find(x => x !== hh && x.si === si); if (o) o.si = oldSi; }
+      hh.par = par; hh.si = si; hh.m = len ? Math.round(len) : null;
+      r.holes.slice().sort((a, b) => a.si - b.si).forEach((x, i) => x.rank = i + 1);
+      r.rating = { ...r.rating, par: r.holes.reduce((t, x) => t + x.par, 0) };
+      if (r.hiUsed != null) r.dh = dailyHandicap(r.hiUsed, r.rating, S.settings.gender);
+      const save = $('#ehSave', el);
+      if (course && save && save.checked) {
+        const c = isLib(course) ? copyFromLibrary(course) : JSON.parse(JSON.stringify(course));
+        const ch = c.holes[hh.n - 1];
+        if (si !== oldSi) { const o = c.holes.find((x, i) => i !== hh.n - 1 && +x.si === si); if (o) o.si = +ch.si; }
+        ch.par = par; ch.si = si; if (len) ch.m = Math.round(len); else delete ch.m;
+        Store.put(c.id, c);
+        r.course = { ...r.course, id: c.id };
+      }
+    });
+    m.close(); hydrate(); render();
+    toast(`Hole ${h.n} updated`);
+  };
 }
 async function finishRound() {
   const r = S.active;
@@ -997,8 +1043,8 @@ function courseEditor(course, prefillName = '') {
     <details style="margin-bottom:12px"><summary class="small">9-hole ratings (optional, for 9-hole rounds)</summary><div class="body" style="padding-top:8px">
       <div class="grid2"><label class="f">Front 9 scratch<input id="fScr" type="number" step="0.1" value="${esc(c.front.scratch)}"></label><label class="f">Front 9 slope<input id="fSlope" type="number" value="${esc(c.front.slope)}"></label>
       <label class="f">Back 9 scratch<input id="bScr" type="number" step="0.1" value="${esc(c.back.scratch)}"></label><label class="f">Back 9 slope<input id="bSlope" type="number" value="${esc(c.back.slope)}"></label></div></div></details>
-    <table class="cedit" style="width:100%"><tr class="tiny muted"><td>Hole</td><td>Par</td><td>Stroke index</td><td></td><td>Hole</td><td>Par</td><td>Stroke index</td></tr>
-    ${Array.from({ length: 9 }, (_, i) => [i, i + 9]).map(([a, b]) => `<tr>${[a, b].map((j, k) => `<td class="num" style="text-align:center;font-weight:600">${j + 1}</td><td><select data-par="${j}">${[3, 4, 5, 6].map(p => `<option ${+c.holes[j].par === p ? 'selected' : ''}>${p}</option>`).join('')}</select></td><td><input data-si="${j}" type="number" min="1" max="18" value="${c.holes[j].si}"></td>${k === 0 ? '<td style="width:10px"></td>' : ''}`).join('')}</tr>`).join('')}
+    <table class="cedit" style="width:100%"><tr class="tiny muted"><td>Hole</td><td>Par</td><td>Index</td><td>Length (m)</td></tr>
+    ${c.holes.map((hh, j) => `${j === 9 ? '<tr><td colspan="4" style="height:8px"></td></tr>' : ''}<tr><td class="num" style="text-align:center;font-weight:600">${j + 1}</td><td><select data-par="${j}" aria-label="Hole ${j + 1} par">${[3, 4, 5, 6].map(p => `<option ${+hh.par === p ? 'selected' : ''}>${p}</option>`).join('')}</select></td><td><input data-si="${j}" type="number" inputmode="numeric" min="1" max="18" value="${hh.si}" aria-label="Hole ${j + 1} stroke index"></td><td><input data-m="${j}" type="number" inputmode="numeric" min="40" max="700" value="${hh.m ?? ''}" placeholder="–" aria-label="Hole ${j + 1} length in metres"></td></tr>`).join('')}
     </table><div id="cPar" class="small muted" style="margin:8px 0"></div><div id="cWarn" class="sihint" style="margin-bottom:10px"></div>
     <div class="row"><button class="btn primary block" id="cSave">Save course</button>${course && S.courses.some(x => x.id === course.id) ? '<button class="btn danger" id="cDel">Delete</button>' : ''}</div>
     ${course && course.libId && !S.courses.some(x => x.id === course.id) ? '<p class="tiny muted" style="margin-top:10px">Saving makes this your own copy of the course. It replaces the library version in your list.</p>' : ''}`);
@@ -1040,7 +1086,7 @@ Return ONLY JSON, no other text, in exactly this shape:
     c.name = $('#cName', el).value.trim() || 'My course'; c.tee = $('#cTee', el).value.trim();
     c.scratch = num($('#cScr', el).value); c.slope = num($('#cSlope', el).value);
     c.front = { scratch: num($('#fScr', el).value), slope: num($('#fSlope', el).value) }; c.back = { scratch: num($('#bScr', el).value), slope: num($('#bSlope', el).value) };
-    c.holes = c.holes.map((h, j) => ({ par: +$(`[data-par="${j}"]`, el).value, si: +$(`[data-si="${j}"]`, el).value }));
+    c.holes = c.holes.map((h, j) => { const o = { par: +$(`[data-par="${j}"]`, el).value, si: +$(`[data-si="${j}"]`, el).value }; const len = num($(`[data-m="${j}"]`, el).value); if (len) o.m = Math.round(len); return o; });
     if (c.scratch == null || c.slope == null) { toast('Add the scratch and slope ratings (they\'re on the scorecard or the GA app).'); return; }
     Store.put(c.id, c); startForm.courseId = c.id; m.close(); hydrate(); render();
   };
