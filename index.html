@@ -681,10 +681,11 @@ const formatLabel = f => f === '18' ? '18 holes' : f === 'front' ? 'Front 9' : '
    Round statistics
    ========================================================= */
 function girOf(h) { if (h.gir != null) return h.gir; if (h.strokes == null || h.putts == null || h.pickup) return h.pickup ? false : null; return h.strokes - h.putts <= h.par - 2; }
+function udOf(h) { if (girOf(h) !== false) return null; if (h.ud != null) return h.ud; if (h.pickup) return false; if (h.strokes == null || h.putts == null) return null; return h.putts <= 1 && h.strokes - h.putts <= h.par - 1; }
 function roundStats(r) {
   const n = isNine(r) ? 9 : 18;
   if (r.quick) return { quick: true, n, gross: r.ags, par: r.rating.par, toPar: r.ags - r.rating.par, pts: r.pts ?? null, putts: r.putts ?? null, complete: true };
-  const st = { n, gross: 0, par: 0, played: 0, putts: 0, puttHoles: 0, fwHit: 0, fwL: 0, fwR: 0, fwN: 0, gir: 0, girN: 0, scrN: 0, scrOk: 0, sandN: 0, sandOk: 0, pen: 0, pts: 0, puttsOnGir: 0, dist: { eagle: 0, birdie: 0, par: 0, bogey: 0, double: 0, worse: 0 }, byPar: { 3: [], 4: [], 5: [] }, complete: true, pickups: 0 };
+  const st = { n, gross: 0, par: 0, played: 0, putts: 0, puttHoles: 0, fwHit: 0, fwL: 0, fwR: 0, fwN: 0, gir: 0, girN: 0, scrN: 0, scrOk: 0, udN: 0, udOk: 0, sandN: 0, sandOk: 0, pen: 0, pts: 0, puttsOnGir: 0, dist: { eagle: 0, birdie: 0, par: 0, bogey: 0, double: 0, worse: 0 }, byPar: { 3: [], 4: [], 5: [] }, complete: true, pickups: 0 };
   for (const h of r.holes) {
     if (h.strokes == null && !h.pickup) { st.complete = false; continue; }
     const strokes = h.pickup ? holeLimit(h, r.dh, n) : h.strokes;
@@ -694,6 +695,7 @@ function roundStats(r) {
     if (h.par > 3 && h.fw) { st.fwN++; if (h.fw === 'hit') st.fwHit++; if (h.fw === 'L') st.fwL++; if (h.fw === 'R') st.fwR++; }
     const g = girOf(h);
     if (g != null) { st.girN++; if (g) { st.gir++; if (h.putts != null) st.puttsOnGir += h.putts; } else { st.scrN++; if (!h.pickup && strokes <= h.par) st.scrOk++; } }
+    const ud = udOf(h); if (ud != null) { st.udN++; if (ud) st.udOk++; }
     if (h.sand) { st.sandN++; if (!h.pickup && strokes <= h.par) st.sandOk++; }
     const d = strokes - h.par;
     if (d <= -2) st.dist.eagle++; else if (d === -1) st.dist.birdie++; else if (d === 0) st.dist.par++; else if (d === 1) st.dist.bogey++; else if (d === 2) st.dist.double++; else st.dist.worse++;
@@ -703,14 +705,14 @@ function roundStats(r) {
   return st;
 }
 function aggregate(rounds) {
-  const A = { rounds: rounds.length, n18: 0, gross18: [], pts18: [], putts18: [], toPar18: [], fwHit: 0, fwL: 0, fwR: 0, fwN: 0, gir: 0, girN: 0, scrN: 0, scrOk: 0, sandN: 0, sandOk: 0, pen: 0, penRounds: 0, puttsOnGir: 0, girForPutts: 0, dist: { eagle: 0, birdie: 0, par: 0, bogey: 0, double: 0, worse: 0 }, distN: 0, byPar: { 3: [], 4: [], 5: [] }, puttHoles: 0, puttsAll: 0, nine: [] };
+  const A = { rounds: rounds.length, n18: 0, gross18: [], pts18: [], putts18: [], toPar18: [], fwHit: 0, fwL: 0, fwR: 0, fwN: 0, gir: 0, girN: 0, scrN: 0, scrOk: 0, udN: 0, udOk: 0, sandN: 0, sandOk: 0, pen: 0, penRounds: 0, puttsOnGir: 0, girForPutts: 0, dist: { eagle: 0, birdie: 0, par: 0, bogey: 0, double: 0, worse: 0 }, distN: 0, byPar: { 3: [], 4: [], 5: [] }, puttHoles: 0, puttsAll: 0, nine: [] };
   for (const r of rounds) {
     const s = roundStats(r);
     if (!s.complete) continue;
     if (s.n === 18) { A.n18++; A.gross18.push(s.gross); A.toPar18.push(s.toPar); if (s.pts != null) A.pts18.push(s.pts); if (!s.quick && s.puttHoles === 18) A.putts18.push(s.putts); else if (s.quick && s.putts != null) A.putts18.push(s.putts); }
     else A.nine.push(s.gross);
     if (s.quick) continue;
-    A.fwHit += s.fwHit; A.fwL += s.fwL; A.fwR += s.fwR; A.fwN += s.fwN; A.gir += s.gir; A.girN += s.girN; A.scrN += s.scrN; A.scrOk += s.scrOk; A.sandN += s.sandN; A.sandOk += s.sandOk;
+    A.fwHit += s.fwHit; A.fwL += s.fwL; A.fwR += s.fwR; A.fwN += s.fwN; A.gir += s.gir; A.girN += s.girN; A.scrN += s.scrN; A.scrOk += s.scrOk; A.udN += s.udN; A.udOk += s.udOk; A.sandN += s.sandN; A.sandOk += s.sandOk;
     A.pen += s.pen; A.penRounds += s.n / 18; A.puttsOnGir += s.puttsOnGir; A.girForPutts += s.gir; A.puttHoles += s.puttHoles; A.puttsAll += s.putts;
     for (const k in s.dist) A.dist[k] += s.dist[k]; A.distN += s.played;
     for (const p of [3, 4, 5]) A.byPar[p].push(...s.byPar[p]);
@@ -803,7 +805,7 @@ window.addEventListener('resize', () => { clearTimeout(window.__rz); window.__rz
 /* =========================================================
    PLAY
    ========================================================= */
-let startForm = { courseId: null, format: '18', date: null, counts: true, pcc: 0, type: 'social' };
+let startForm = { courseId: null, format: '18', date: null, counts: true, pcc: 0, type: 'social', start10: false };
 function renderPlay(v) {
   if (S.active) return renderLive(v);
   const pi = playingIndex();
@@ -832,6 +834,7 @@ function renderPlay(v) {
     <div id="cpick" style="margin-bottom:12px"></div>
     ${course ? `<div class="row" style="margin:-4px 0 12px"><button class="btn sm ghost" id="editCourse">Edit course</button><button class="btn sm ghost" id="addCourse">+ Add course</button></div>` : ''}
     <div class="seg" id="sFormat" style="margin-bottom:12px">${['18', 'front', 'back'].map(f => `<button data-f="${f}" class="${startForm.format === f ? 'on' : ''}">${formatLabel(f)}</button>`).join('')}</div>
+    ${startForm.format === '18' ? `<label class="check" style="margin:-2px 0 12px"><input type="checkbox" id="s10" ${startForm.start10 ? 'checked' : ''}> Start on the 10th (back nine first)</label>` : ''}
     <div class="tiny muted" style="margin:0 2px 4px">Round type</div>
     <div class="seg" id="sType" style="margin-bottom:12px">${[['social', 'Social'], ['comp', 'Competition']].map(([k, l]) => `<button data-k="${k}" class="${startForm.type === k ? 'on' : ''}">${l}</button>`).join('')}</div>
     <div class="grid2"><label class="f">Date<input type="date" id="sDate" value="${startForm.date || today()}"></label>
@@ -848,6 +851,7 @@ function renderPlay(v) {
   const sp = $('#sPcc'); if (sp) sp.onchange = e => startForm.pcc = num(e.target.value) || 0;
   $$('#sType button').forEach(b => b.onclick = () => { startForm.type = b.dataset.k; render(); });
   $('#sCounts').onchange = e => startForm.counts = e.target.checked;
+  const s10 = $('#s10'); if (s10) s10.onchange = e => startForm.start10 = e.target.checked;
   const ac = $('#addCourse'); if (ac) ac.onclick = () => courseEditor(null);
   const ec = $('#editCourse'); if (ec) ec.onclick = () => courseEditor(isLib(course) ? copyFromLibrary(course) : course);
   const ar = $('#addRatings'); if (ar) ar.onclick = () => courseEditor(isLib(course) ? copyFromLibrary(course) : course);
@@ -871,19 +875,24 @@ function startRound(course) {
   const rating = ratingFor(course, startForm.format);
   const dh = pi.hi != null ? dailyHandicap(pi.hi, rating, S.settings.gender) : (rating.nine ? 27 : 54);
   const r = { id: uid('r'), kind: 'round', date: $('#sDate').value || today(), course: { id: course.id, name: course.name, tee: course.tee || '' }, format: startForm.format, rating, holes: playedHoles(course, startForm.format), hiUsed: pi.hi, dh, counts: $('#sCounts').checked, type: startForm.type, pcc: startForm.type === 'comp' ? (num($('#sPcc')?.value) || 0) : 0, started: Date.now(), cur: 0 };
+  if (startForm.format === '18' && startForm.start10 && r.holes.length === 18) { r.start10 = true; r.cur = 9; }
   S.active = r; Store.put('active', { round: r }); render();
 }
 function updateActive(fn) { fn(S.active); Store.put('active', { round: S.active }, true); render(); }
 
+function playOrder(r) { const a = r.holes.map((_, i) => i); return r.start10 && a.length === 18 ? a.slice(9).concat(a.slice(0, 9)) : a; }
 function renderLive(v) {
   const r = S.active, n = r.holes.length, h = r.holes[r.cur];
+  const seq = playOrder(r), pos = seq.indexOf(r.cur), isDone = x => x.strokes != null || x.pickup;
+  const prevI = pos > 0 ? seq[pos - 1] : null;
+  const nextI = pos < n - 1 ? seq[pos + 1] : (seq.find(i => i !== r.cur && !isDone(r.holes[i])) ?? null);
   const recv = strokesOn(h.rank, n, r.dh);
   const st = roundStats(r);
   const g = girOf(h);
   const thru = r.holes.filter(x => x.strokes != null || x.pickup).length;
   v.innerHTML = `
   <div class="spread" style="margin:6px 2px 8px"><div><div style="font-weight:700">${esc(r.course.name)}</div><div class="tiny muted">${formatLabel(r.format)} · ${r.type === 'comp' ? 'Competition' : 'Social'} · Daily Handicap ${r.dh ?? '–'}${r.counts ? '' : ' · not counted'}</div></div><button class="btn sm" id="card">Scorecard</button></div>
-  <div class="holes" id="holes">${r.holes.map((x, i) => `<button data-i="${i}" class="${i === r.cur ? 'cur' : (x.strokes != null || x.pickup) ? 'done' : ''}">${x.n}</button>`).join('')}</div>
+  <div class="holes" id="holes">${seq.map(i => { const x = r.holes[i]; return `<button data-i="${i}" class="${i === r.cur ? 'cur' : isDone(x) ? 'done' : ''}">${x.n}</button>`; }).join('')}</div>
   <div class="band">
     <div class="hole-top"><div><div class="lbl">Hole</div><div class="hno">${h.n}</div></div>${holeArt(h)}</div>
     <button class="hole-edit" id="editHole" aria-label="Edit hole ${h.n} details"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>Edit hole</button>
@@ -894,6 +903,7 @@ function renderLive(v) {
     <div class="stepper"><div class="lab">Putts</div><div class="ctl"><button data-a="p-">−</button><div class="val">${h.putts ?? '–'}</div><button data-a="p+">+</button></div></div>
     ${h.par > 3 ? `<div class="stepper"><div class="lab">Fairway</div><div class="opts">${[['L', '← Left'], ['hit', 'Hit'], ['R', 'Right →']].map(([k, l]) => `<button data-fw="${k}" class="${h.fw === k ? 'on' : ''}">${l}</button>`).join('')}</div></div>` : ''}
     <div class="stepper"><div class="lab">Green in reg.<small>${h.gir == null ? 'Auto from strokes & putts' : 'Set manually · tap to cycle'}</small></div><div class="opts"><button id="gir" class="${g ? 'on' : ''}">${g == null ? '–' : g ? 'Yes' : 'No'}</button></div></div>
+    ${g === false ? `<div class="stepper"><div class="lab">Up &amp; down<small>${h.ud == null ? 'Auto · tap to change' : 'Set manually · tap to cycle'}</small></div><div class="opts"><button id="ud" class="${udOf(h) ? 'on' : ''}">${udOf(h) == null ? '–' : udOf(h) ? 'Yes' : 'No'}</button></div></div>` : ''}
     <div class="stepper"><div class="lab">Penalties</div><div class="ctl"><button data-a="pen-">−</button><div class="val" style="font-size:24px">${h.pen || 0}</div><button data-a="pen+">+</button></div></div>
     <div class="stepper"><div class="lab">Other</div><div class="opts"><button id="sand" class="${h.sand ? 'on' : ''}">Bunker</button><button id="pick" class="${h.pickup ? 'on' : ''}">Pick up</button></div></div>
   </div>
@@ -904,7 +914,7 @@ function renderLive(v) {
     <div><div class="k">Points</div><div class="v">${st.pts}</div></div>
     <div><div class="k">Putts</div><div class="v">${st.putts}</div></div>
   </div></div>
-  <div class="row"><button class="btn block" id="prev" ${r.cur === 0 ? 'disabled' : ''}>← Hole ${r.holes[r.cur - 1]?.n ?? ''}</button>${r.cur < n - 1 ? `<button class="btn primary block" id="next">Hole ${r.holes[r.cur + 1].n} →</button>` : `<button class="btn primary block" id="finish">Finish round</button>`}</div>
+  <div class="row"><button class="btn block" id="prev" ${prevI == null ? 'disabled' : ''}>← Hole ${prevI != null ? r.holes[prevI].n : ''}</button>${nextI != null ? `<button class="btn primary block" id="next">Hole ${r.holes[nextI].n} →</button>` : `<button class="btn primary block" id="finish">Finish round</button>`}</div>
   <div class="row" style="margin-top:10px"><button class="btn ghost block small" id="finish2">Finish now</button><button class="btn ghost danger block small" id="abandon">Abandon round</button></div>`;
   const holesEl = $('#holes'); const cb = $('.cur', holesEl); if (cb) holesEl.scrollLeft = cb.offsetLeft - holesEl.clientWidth / 2 + 19;
   $$('#holes button').forEach(b => b.onclick = () => updateActive(r => r.cur = +b.dataset.i));
@@ -919,10 +929,11 @@ function renderLive(v) {
   }));
   $$('[data-fw]', v).forEach(b => b.onclick = () => updateActive(r => { const h = r.holes[r.cur]; h.fw = h.fw === b.dataset.fw ? null : b.dataset.fw; }));
   $('#gir').onclick = () => updateActive(r => { const h = r.holes[r.cur]; const auto = girOf({ ...h, gir: null }); h.gir = h.gir == null ? (auto == null ? true : !auto) : null; });
+  const udb = $('#ud'); if (udb) udb.onclick = () => updateActive(r => { const h = r.holes[r.cur]; const auto = udOf({ ...h, ud: null }); h.ud = h.ud == null ? !auto : null; });
   $('#sand').onclick = () => updateActive(r => { const h = r.holes[r.cur]; h.sand = !h.sand; });
   $('#pick').onclick = () => updateActive(r => { const h = r.holes[r.cur]; h.pickup = !h.pickup; if (h.pickup) { h.strokes = null; } });
-  $('#prev').onclick = () => updateActive(r => r.cur = Math.max(0, r.cur - 1));
-  const nx = $('#next'); if (nx) nx.onclick = () => updateActive(r => r.cur = Math.min(n - 1, r.cur + 1));
+  $('#prev').onclick = () => { if (prevI != null) updateActive(r => r.cur = prevI); };
+  const nx = $('#next'); if (nx) nx.onclick = () => updateActive(r => r.cur = nextI);
   const fin = () => finishRound(); const f1b = $('#finish'); if (f1b) f1b.onclick = fin; $('#finish2').onclick = fin;
   $('#card').onclick = () => scorecardSheet(r);
   $('#editHole').onclick = () => editHoleSheet();
@@ -1019,6 +1030,8 @@ function viewRound(r) {
     <div class="tile"><div class="k">Fairways</div><div class="v">${s.fwHit}/${s.fwN}</div><div class="s">${pct(s.fwHit, s.fwN)}</div></div>
     <div class="tile"><div class="k">Greens</div><div class="v">${s.gir}/${s.girN}</div><div class="s">${pct(s.gir, s.girN)}</div></div>
     <div class="tile"><div class="k">Scrambling</div><div class="v">${s.scrOk}/${s.scrN}</div><div class="s">${pct(s.scrOk, s.scrN)}</div></div>
+    <div class="tile"><div class="k">Up &amp; down</div><div class="v">${s.udOk}/${s.udN}</div><div class="s">${pct(s.udOk, s.udN)}</div></div>
+    <div class="tile"><div class="k">Penalties</div><div class="v">${s.pen}</div><div class="s">${s.sandN ? s.sandOk + '/' + s.sandN + ' sand saves' : 'No bunkers'}</div></div>
   </div>${scorecardHtml(r)}`;
   const m = openSheet(`<div class="hd"><h2>${esc(r.course.name)}</h2><button class="x" data-close>×</button></div>
     <div class="small muted" style="margin:-6px 0 12px">${fmtDate(r.date)} · ${formatLabel(r.format)} · Scratch ${r.rating.scratch ?? '–'} / Slope ${r.rating.slope ?? '–'}${r.pcc ? ' · PCC ' + signed(r.pcc) : ''}</div>
@@ -1153,8 +1166,9 @@ function renderStats(v) {
     <div class="tile"><div class="k">Fairways hit</div><div class="v">${pct(A.fwHit, A.fwN)}</div>${A.fwN ? `<div class="lhr" title="Left / hit / right"><span style="flex:${A.fwL || .001};background:var(--sand)"></span><span style="flex:${A.fwHit || .001};background:var(--chart)"></span><span style="flex:${A.fwR || .001};background:var(--sand)"></span></div><div class="s">Left ${pct(A.fwL, A.fwN)}, right ${pct(A.fwR, A.fwN)}</div>` : ''}</div>
     <div class="tile"><div class="k">Greens in reg.</div><div class="v">${pct(A.gir, A.girN)}</div><div class="s">${A.girN ? f1(A.gir / A.girN * 18) + ' per 18' : ''}</div></div>
     <div class="tile"><div class="k">Scrambling</div><div class="v">${pct(A.scrOk, A.scrN)}</div><div class="s">Par or better after missing green</div></div>
+    <div class="tile"><div class="k">Up &amp; down</div><div class="v">${pct(A.udOk, A.udN)}</div><div class="s">${A.udN ? A.udOk + ' of ' + A.udN + ' missed greens' : 'Two shots or fewer from off the green'}</div></div>
     <div class="tile"><div class="k">Sand saves</div><div class="v">${pct(A.sandOk, A.sandN)}</div><div class="s">${A.sandN} bunker holes</div></div>
-    <div class="tile"><div class="k">Penalties / 18</div><div class="v">${A.penRounds ? f1(A.pen / A.penRounds) : '–'}</div></div>
+    <div class="tile" style="grid-column:1/-1"><div class="k">Penalties / 18</div><div class="v">${A.penRounds ? f1(A.pen / A.penRounds) : '–'}</div></div>
   </div>
   <div class="card"><h3>Gross score trend (18 holes)</h3>${lineChart(trend, { title: 'Gross score' })}</div>
   ${ptsTrend.length >= 2 ? `<div class="card"><h3>Stableford trend</h3>${lineChart(ptsTrend, { title: 'Stableford' })}</div>` : ''}
