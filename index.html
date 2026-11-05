@@ -97,6 +97,18 @@ label.f textarea{min-height:70px;resize:vertical}
 .holehead .meta{text-align:right;font-size:13px;color:var(--ink2)}
 .stepper{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 0;border-bottom:1px solid var(--line)}
 .stepper:last-child{border-bottom:0}
+.gm{display:grid;grid-template-columns:repeat(3,42px);grid-template-rows:repeat(3,42px);gap:5px}
+.gm button{border:1px solid var(--line);background:var(--surface);border-radius:10px;font-size:19px;color:var(--ink2);cursor:pointer;padding:0;line-height:1}
+.gm button.on{background:var(--flag);border-color:var(--flag);color:#fff}
+.gm .gc{border-radius:50%;background:var(--accent-soft);border:2px solid var(--stripeA);display:flex;align-items:center;justify-content:center}
+.gm .gc i{width:6px;height:6px;border-radius:50%;background:var(--ink)}
+.missmap{display:grid;grid-template-columns:1fr 1.25fr 1fr;grid-template-rows:auto auto auto;gap:6px;align-items:center;justify-items:center;margin:10px 0 6px}
+.missmap .c{font-weight:700;font-size:20px;font-stretch:80%;font-variant-numeric:tabular-nums;color:var(--ink2);text-align:center;line-height:1.1}
+.missmap .c small{display:block;font-weight:400;font-size:11px;font-stretch:100%;color:var(--muted)}
+.missmap .c.top{color:var(--flag)}
+.missmap .gr{width:100%;aspect-ratio:1.35;border-radius:50%;background:radial-gradient(circle at 50% 45%,#5fae6f,#2c744b 72%);border:3px solid #d7c48f;position:relative}
+.missmap .gr::after{content:'';position:absolute;left:52%;top:18%;width:2px;height:40%;background:#f4fbf3}
+.missmap .gr::before{content:'';position:absolute;left:calc(52% + 2px);top:18%;width:14px;height:10px;background:var(--flag)}
 .stepper .lab{font-weight:600}
 .stepper .lab small{display:block;font-weight:400;color:var(--muted);font-size:12px}
 .stepper .ctl{display:flex;align-items:center;gap:10px}
@@ -683,11 +695,13 @@ const formatLabel = f => f === '18' ? '18 holes' : f === 'front' ? 'Front 9' : '
    Round statistics
    ========================================================= */
 function girOf(h) { if (h.gir != null) return h.gir; if (h.strokes == null || h.putts == null || h.pickup) return h.pickup ? false : null; return h.strokes - h.putts <= h.par - 2; }
+const MISS = [['Ll', '↖', 'Long left'], ['Lc', '↑', 'Long'], ['Lr', '↗', 'Long right'], ['Ml', '←', 'Left'], null, ['Mr', '→', 'Right'], ['Sl', '↙', 'Short left'], ['Sc', '↓', 'Short'], ['Sr', '↘', 'Short right']];
+const missOf = h => girOf(h) === false && h.gm ? h.gm : null;
 function udOf(h) { if (girOf(h) !== false) return null; if (h.ud != null) return h.ud; if (h.pickup) return false; if (h.strokes == null || h.putts == null) return null; return h.putts <= 1 && h.strokes - h.putts <= h.par - 1; }
 function roundStats(r) {
   const n = isNine(r) ? 9 : 18;
   if (r.quick) return { quick: true, n, gross: r.ags, par: r.rating.par, toPar: r.ags - r.rating.par, pts: r.pts ?? null, putts: r.putts ?? null, complete: true };
-  const st = { n, gross: 0, par: 0, played: 0, putts: 0, puttHoles: 0, fwHit: 0, fwL: 0, fwR: 0, fwN: 0, gir: 0, girN: 0, scrN: 0, scrOk: 0, udN: 0, udOk: 0, sandN: 0, sandOk: 0, pen: 0, pts: 0, puttsOnGir: 0, dist: { eagle: 0, birdie: 0, par: 0, bogey: 0, double: 0, worse: 0 }, byPar: { 3: [], 4: [], 5: [] }, complete: true, pickups: 0 };
+  const st = { n, gross: 0, par: 0, played: 0, putts: 0, puttHoles: 0, fwHit: 0, fwL: 0, fwR: 0, fwN: 0, gir: 0, girN: 0, scrN: 0, scrOk: 0, udN: 0, udOk: 0, gm: {}, gmN: 0, sandN: 0, sandOk: 0, pen: 0, pts: 0, puttsOnGir: 0, dist: { eagle: 0, birdie: 0, par: 0, bogey: 0, double: 0, worse: 0 }, byPar: { 3: [], 4: [], 5: [] }, complete: true, pickups: 0 };
   for (const h of r.holes) {
     if (h.strokes == null && !h.pickup) { st.complete = false; continue; }
     const strokes = h.pickup ? holeLimit(h, r.dh, n) : h.strokes;
@@ -698,6 +712,7 @@ function roundStats(r) {
     const g = girOf(h);
     if (g != null) { st.girN++; if (g) { st.gir++; if (h.putts != null) st.puttsOnGir += h.putts; } else { st.scrN++; if (!h.pickup && strokes <= h.par) st.scrOk++; } }
     const ud = udOf(h); if (ud != null) { st.udN++; if (ud) st.udOk++; }
+    const gm = missOf(h); if (gm) { st.gmN++; st.gm[gm] = (st.gm[gm] || 0) + 1; }
     if (h.sand) { st.sandN++; if (!h.pickup && strokes <= h.par) st.sandOk++; }
     const d = strokes - h.par;
     if (d <= -2) st.dist.eagle++; else if (d === -1) st.dist.birdie++; else if (d === 0) st.dist.par++; else if (d === 1) st.dist.bogey++; else if (d === 2) st.dist.double++; else st.dist.worse++;
@@ -707,19 +722,33 @@ function roundStats(r) {
   return st;
 }
 function aggregate(rounds) {
-  const A = { rounds: rounds.length, n18: 0, gross18: [], pts18: [], putts18: [], toPar18: [], fwHit: 0, fwL: 0, fwR: 0, fwN: 0, gir: 0, girN: 0, scrN: 0, scrOk: 0, udN: 0, udOk: 0, sandN: 0, sandOk: 0, pen: 0, penRounds: 0, puttsOnGir: 0, girForPutts: 0, dist: { eagle: 0, birdie: 0, par: 0, bogey: 0, double: 0, worse: 0 }, distN: 0, byPar: { 3: [], 4: [], 5: [] }, puttHoles: 0, puttsAll: 0, nine: [] };
+  const A = { rounds: rounds.length, n18: 0, gross18: [], pts18: [], putts18: [], toPar18: [], fwHit: 0, fwL: 0, fwR: 0, fwN: 0, gir: 0, girN: 0, scrN: 0, scrOk: 0, udN: 0, udOk: 0, gm: {}, gmN: 0, sandN: 0, sandOk: 0, pen: 0, penRounds: 0, puttsOnGir: 0, girForPutts: 0, dist: { eagle: 0, birdie: 0, par: 0, bogey: 0, double: 0, worse: 0 }, distN: 0, byPar: { 3: [], 4: [], 5: [] }, puttHoles: 0, puttsAll: 0, nine: [] };
   for (const r of rounds) {
     const s = roundStats(r);
     if (!s.complete) continue;
     if (s.n === 18) { A.n18++; A.gross18.push(s.gross); A.toPar18.push(s.toPar); if (s.pts != null) A.pts18.push(s.pts); if (!s.quick && s.puttHoles === 18) A.putts18.push(s.putts); else if (s.quick && s.putts != null) A.putts18.push(s.putts); }
     else A.nine.push(s.gross);
     if (s.quick) continue;
-    A.fwHit += s.fwHit; A.fwL += s.fwL; A.fwR += s.fwR; A.fwN += s.fwN; A.gir += s.gir; A.girN += s.girN; A.scrN += s.scrN; A.scrOk += s.scrOk; A.udN += s.udN; A.udOk += s.udOk; A.sandN += s.sandN; A.sandOk += s.sandOk;
+    A.fwHit += s.fwHit; A.fwL += s.fwL; A.fwR += s.fwR; A.fwN += s.fwN; A.gir += s.gir; A.girN += s.girN; A.scrN += s.scrN; A.scrOk += s.scrOk; A.udN += s.udN; A.udOk += s.udOk; A.gmN += s.gmN; for (const k in s.gm) A.gm[k] = (A.gm[k] || 0) + s.gm[k]; A.sandN += s.sandN; A.sandOk += s.sandOk;
     A.pen += s.pen; A.penRounds += s.n / 18; A.puttsOnGir += s.puttsOnGir; A.girForPutts += s.gir; A.puttHoles += s.puttHoles; A.puttsAll += s.putts;
     for (const k in s.dist) A.dist[k] += s.dist[k]; A.distN += s.played;
     for (const p of [3, 4, 5]) A.byPar[p].push(...s.byPar[p]);
   }
   return A;
+}
+function missCard(A) {
+  if (!A.gmN) return `<div class="card"><h3>Missed greens</h3><p class="small muted" style="margin:4px 0 0">When you miss a green, tap where the ball finished. Your miss pattern shows up here.</p></div>`;
+  const c = k => A.gm[k] || 0, P = k => Math.round(c(k) / A.gmN * 100);
+  const top = Math.max(...MISS.filter(Boolean).map(m => c(m[0])));
+  const short = c('Sl') + c('Sc') + c('Sr'), long = c('Ll') + c('Lc') + c('Lr'), left = c('Ll') + c('Ml') + c('Sl'), right = c('Lr') + c('Mr') + c('Sr');
+  const pc = n => Math.round(n / A.gmN * 100) + '%';
+  const depth = short > long ? 'short' : long > short ? 'long' : null, side = left > right ? 'left' : right > left ? 'right' : null;
+  const main = MISS.filter(Boolean).reduce((a, m) => c(m[0]) > c(a[0]) ? m : a);
+  return `<div class="card"><h3>Missed greens</h3><div class="small muted">${A.gmN} misses marked · most often <b style="color:var(--ink)">${main[2].toLowerCase()}</b></div>
+    <div class="missmap">${MISS.map(m => m ? `<div class="c ${c(m[0]) === top && top > 0 ? 'top' : ''}">${P(m[0])}%<small>${m[2]}</small></div>` : '<div class="gr"></div>').join('')}</div>
+    <div class="small" style="text-align:center;color:var(--ink2)">Short ${pc(short)} · Long ${pc(long)} · Left ${pc(left)} · Right ${pc(right)}</div>
+    ${depth && Math.abs(short - long) / A.gmN >= .2 ? `<p class="tiny muted" style="margin:8px 0 0;text-align:center">${depth === 'short' ? 'You miss short much more than long. Try one more club on approaches.' : 'You miss long more than short. Try one less club, or aim for the front of the green.'}</p>` : ''}
+  </div>`;
 }
 const avg = a => a.length ? a.reduce((x, y) => x + y, 0) / a.length : null;
 
@@ -905,6 +934,7 @@ function renderLive(v) {
     <div class="stepper"><div class="lab">Putts</div><div class="ctl"><button data-a="p-">−</button><div class="val">${h.putts ?? '–'}</div><button data-a="p+">+</button></div></div>
     ${h.par > 3 ? `<div class="stepper"><div class="lab">Fairway</div><div class="opts">${[['L', '← Left'], ['hit', 'Hit'], ['R', 'Right →']].map(([k, l]) => `<button data-fw="${k}" class="${h.fw === k ? 'on' : ''}">${l}</button>`).join('')}</div></div>` : ''}
     <div class="stepper"><div class="lab">Green in reg.<small>${h.gir == null ? 'Auto from strokes & putts' : 'Set manually · tap to cycle'}</small></div><div class="opts"><button id="gir" class="${g ? 'on' : ''}">${g == null ? '–' : g ? 'Yes' : 'No'}</button></div></div>
+    ${g === false ? `<div class="stepper"><div class="lab">Missed green<small>${h.gm ? MISS.find(m => m && m[0] === h.gm)[2] + ' · tap again to clear' : 'Where did it finish? Optional'}</small></div><div class="gm">${MISS.map(m => m ? `<button data-gm="${m[0]}" class="${h.gm === m[0] ? 'on' : ''}" aria-label="${m[2]}">${m[1]}</button>` : '<div class="gc"><i></i></div>').join('')}</div></div>` : ''}
     ${g === false ? `<div class="stepper"><div class="lab">Up &amp; down<small>${h.ud == null ? 'Auto · tap to change' : 'Set manually · tap to cycle'}</small></div><div class="opts"><button id="ud" class="${udOf(h) ? 'on' : ''}">${udOf(h) == null ? '–' : udOf(h) ? 'Yes' : 'No'}</button></div></div>` : ''}
     <div class="stepper"><div class="lab">Penalties</div><div class="ctl"><button data-a="pen-">−</button><div class="val" style="font-size:24px">${h.pen || 0}</div><button data-a="pen+">+</button></div></div>
     <div class="stepper"><div class="lab">Other</div><div class="opts"><button id="sand" class="${h.sand ? 'on' : ''}">Bunker</button><button id="pick" class="${h.pickup ? 'on' : ''}">Pick up</button></div></div>
@@ -931,6 +961,7 @@ function renderLive(v) {
   }));
   $$('[data-fw]', v).forEach(b => b.onclick = () => updateActive(r => { const h = r.holes[r.cur]; h.fw = h.fw === b.dataset.fw ? null : b.dataset.fw; }));
   $('#gir').onclick = () => updateActive(r => { const h = r.holes[r.cur]; const auto = girOf({ ...h, gir: null }); h.gir = h.gir == null ? (auto == null ? true : !auto) : null; });
+  $$('[data-gm]', v).forEach(b => b.onclick = () => updateActive(r => { const h = r.holes[r.cur]; h.gm = h.gm === b.dataset.gm ? null : b.dataset.gm; }));
   const udb = $('#ud'); if (udb) udb.onclick = () => updateActive(r => { const h = r.holes[r.cur]; const auto = udOf({ ...h, ud: null }); h.ud = h.ud == null ? !auto : null; });
   $('#sand').onclick = () => updateActive(r => { const h = r.holes[r.cur]; h.sand = !h.sand; });
   $('#pick').onclick = () => updateActive(r => { const h = r.holes[r.cur]; h.pickup = !h.pickup; if (h.pickup) { h.strokes = null; } });
@@ -1017,9 +1048,10 @@ function scorecardHtml(r) {
     <tr><td>Pts</td>${hs.map(h => `<td class="num">${(h.strokes != null || h.pickup) ? pointsOn(h, r.dh, n) : ''}</td>`).join('')}<td class="num tot">${sum(hs, h => pointsOn(h, r.dh, n))}</td></tr>
     <tr><td>FW</td>${hs.map(h => `<td>${h.par === 3 ? '' : h.fw === 'hit' ? '●' : h.fw === 'L' ? '←' : h.fw === 'R' ? '→' : ''}</td>`).join('')}<td class="tot"></td></tr>
     <tr><td>GIR</td>${hs.map(h => { const g = girOf(h); return `<td>${g ? '●' : g === false ? '○' : ''}</td>`; }).join('')}<td class="tot"></td></tr>
+    ${hs.some(missOf) ? `<tr><td>Miss</td>${hs.map(h => { const m = missOf(h); return `<td style="color:var(--flag)">${m ? MISS.find(x => x && x[0] === m)[1] : ''}</td>`; }).join('')}<td class="tot"></td></tr>` : ''}
   </table></div>`).join('');
 }
-function scorecardSheet(r) { openSheet(`<div class="hd"><h2>Scorecard</h2><button class="x" data-close>×</button></div>${scorecardHtml(r)}<p class="tiny muted">P = picked up (counted as net double bogey for handicap). ● hit, ○ missed.</p>`); }
+function scorecardSheet(r) { openSheet(`<div class="hd"><h2>Scorecard</h2><button class="x" data-close>×</button></div>${scorecardHtml(r)}<p class="tiny muted">P = picked up (counted as net double bogey for handicap). ● hit, ○ missed. Arrows show where a missed green finished (↑ long, ↓ short).</p>`); }
 function viewRound(r) {
   if (!r) return;
   const s = roundStats(r);
@@ -1172,6 +1204,7 @@ function renderStats(v) {
     <div class="tile"><div class="k">Sand saves</div><div class="v">${pct(A.sandOk, A.sandN)}</div><div class="s">${A.sandN} bunker holes</div></div>
     <div class="tile" style="grid-column:1/-1"><div class="k">Penalties / 18</div><div class="v">${A.penRounds ? f1(A.pen / A.penRounds) : '–'}</div></div>
   </div>
+  ${missCard(A)}
   <div class="card"><h3>Gross score trend (18 holes)</h3>${lineChart(trend, { title: 'Gross score' })}</div>
   ${ptsTrend.length >= 2 ? `<div class="card"><h3>Stableford trend</h3>${lineChart(ptsTrend, { title: 'Stableford' })}</div>` : ''}
   <div class="card"><h3>Scoring by par</h3>
