@@ -16,14 +16,14 @@
 :root{
   --bg:#e7eee5; --surface:#fbfcf8; --surface2:#dfe7dc; --ink:#0f2a1f; --ink2:#3f5a4c; --muted:#6f8679;
   --line:#d3ddd0; --accent:#0f4d36; --accent-ink:#ffffff; --accent-soft:#d2e6d7; --warn:#a85d00; --bad:#c2321f; --good:#1e7a4c;
-  --flag:#e23b2a; --sand:#e6d4a3; --stripeA:#2c744b; --stripeB:#337e53; --band-ink:#f4fbf3; --band-dim:rgba(244,251,243,.72);
+  --flag:#e23b2a; --birdie:#1d63c9; --sand:#e6d4a3; --stripeA:#2c744b; --stripeB:#337e53; --band-ink:#f4fbf3; --band-dim:rgba(244,251,243,.72);
   --chart:#0f4d36; --grid:#dbe4d8; --radius:16px;
   --font:'Bricolage Grotesque',system-ui,sans-serif; --mono:'Bricolage Grotesque',system-ui,sans-serif;
 }
 @media (prefers-color-scheme:dark){:root{
   --bg:#0b1611; --surface:#13221a; --surface2:#1b2e23; --ink:#e8f1ea; --ink2:#b4c7ba; --muted:#86a091;
   --line:#243a2d; --accent:#6bcb8f; --accent-ink:#06170d; --accent-soft:#1c3a28; --warn:#e0a24a; --bad:#ff7a66; --good:#6bcb8f;
-  --flag:#ff6a55; --sand:#c9b47e; --stripeA:#1b4d32; --stripeB:#205639;
+  --flag:#ff6a55; --birdie:#6aa8ff; --sand:#c9b47e; --stripeA:#1b4d32; --stripeB:#205639;
   --chart:#6bcb8f; --grid:#203327;
 }}
 *{box-sizing:border-box}
@@ -102,10 +102,10 @@ label.f textarea{min-height:70px;resize:vertical}
 .stepper .ctl{display:flex;align-items:center;gap:10px}
 .stepper .ctl button{width:48px;height:48px;border-radius:50%;border:1px solid var(--line);background:var(--surface2);font-size:24px;font-weight:500;cursor:pointer;line-height:1}
 .stepper .val{min-width:58px;height:58px;display:flex;align-items:center;justify-content:center;font-size:36px;font-weight:700;position:relative}
-.val.ring1,.val.ring2{border:2.5px solid var(--flag);border-radius:50%;color:var(--flag)}
-.val.ring2{box-shadow:0 0 0 3px var(--surface),0 0 0 5.5px var(--flag)}
-.val.box1,.val.box2{border:2.5px solid var(--ink2);border-radius:6px}
-.val.box2{box-shadow:0 0 0 3px var(--surface),0 0 0 5.5px var(--ink2)}
+.val.ring1,.val.ring2{border:2.5px solid var(--birdie);border-radius:50%;color:var(--birdie)}
+.val.ring2{box-shadow:0 0 0 3px var(--surface),0 0 0 5.5px var(--birdie)}
+.val.box1,.val.box2{border:2.5px solid var(--flag);border-radius:6px;color:var(--flag)}
+.val.box2{box-shadow:0 0 0 3px var(--surface),0 0 0 5.5px var(--flag)}
 .opts{display:flex;gap:6px}
 .opts button{border:1px solid var(--line);background:var(--surface);border-radius:10px;padding:9px 12px;font-weight:600;font-size:13px;cursor:pointer;min-width:52px}
 .opts button.on{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
@@ -159,9 +159,11 @@ label.f textarea{min-height:70px;resize:vertical}
 .sc th:first-child,.sc td:first-child{text-align:left;position:sticky;left:0;background:var(--surface);font-weight:600}
 .sc td.num{font-family:var(--mono)}
 .sc .tot{font-weight:700;background:var(--surface2)}
-.sc .b{display:inline-block;min-width:22px;padding:1px 4px;border-radius:50%}
-.sc .under{border:1.5px solid var(--flag);border-radius:50%;color:var(--flag)}
-.sc .over{border:1.5px solid var(--ink2);border-radius:3px}
+.sc .b{display:inline-block;min-width:22px;padding:1px 4px;border-radius:50%;margin:3px}
+.sc .under{border:1.5px solid var(--birdie);border-radius:50%;color:var(--birdie)}
+.sc .eag{box-shadow:0 0 0 1.5px var(--surface),0 0 0 3px var(--birdie)}
+.sc .over{border:1.5px solid var(--flag);border-radius:3px;color:var(--flag)}
+.sc .dbl{box-shadow:0 0 0 1.5px var(--surface),0 0 0 3px var(--flag)}
 table.t{width:100%;border-collapse:collapse;font-size:13.5px}
 table.t th{font-weight:500;color:var(--muted);font-size:12px;text-align:left;padding:6px 6px;border-bottom:1px solid var(--line)}
 table.t td{padding:8px 6px;border-bottom:1px solid var(--line)}
@@ -1004,7 +1006,7 @@ async function finishRound() {
 function scorecardHtml(r) {
   const n = r.holes.length;
   const parts = n === 18 ? [r.holes.slice(0, 9), r.holes.slice(9)] : [r.holes];
-  const cell = h => { if (h.pickup) return '<span class="b">P</span>'; if (h.strokes == null) return '–'; const d = h.strokes - h.par; return `<span class="b ${d < 0 ? 'under' : d > 0 ? 'over' : ''}">${h.strokes}</span>`; };
+  const cell = h => { if (h.pickup) return '<span class="b">P</span>'; if (h.strokes == null) return '–'; const d = h.strokes - h.par; return `<span class="b ${d <= -2 ? 'under eag' : d === -1 ? 'under bird' : d === 1 ? 'over' : d >= 2 ? 'over dbl' : ''}">${h.strokes}</span>`; };
   const sum = (hs, f) => hs.reduce((s, h) => s + (f(h) || 0), 0);
   return parts.map(hs => `<div class="sc" style="margin-bottom:10px"><table>
     <tr><th>Hole</th>${hs.map(h => `<th>${h.n}</th>`).join('')}<th class="tot">Tot</th></tr>
@@ -1148,7 +1150,7 @@ function renderStats(v) {
   const trend = done.filter(r => !isNine(r)).slice(-30).map(r => ({ x: fmtDate(r.date).replace(/ \d{4}$/, ''), y: roundStats(r).gross, sub: r.course.name }));
   const ptsTrend = done.filter(r => !isNine(r)).map(r => ({ r, s: roundStats(r) })).filter(o => o.s.pts != null).slice(-30).map(o => ({ x: fmtDate(o.r.date).replace(/ \d{4}$/, ''), y: o.s.pts, sub: o.r.course.name }));
   const delta = (cur, all, lowerBetter) => { if (cur == null || all == null || statsRange === 0 || pool.length === done.length) return ''; const d = r1(cur - all); if (!d) return '<span class="muted">same as all-time</span>'; const better = lowerBetter ? d < 0 : d > 0; return `<span style="color:${better ? 'var(--good)' : 'var(--ink2)'}">${d > 0 ? '+' : ''}${d} vs all-time</span>`; };
-  const distRows = [['Eagle+', 'eagle'], ['Birdie', 'birdie'], ['Par', 'par'], ['Bogey', 'bogey'], ['Double', 'double'], ['Triple+', 'worse']].map(([k, key]) => ({ k, v: A.distN ? A.dist[key] / A.distN * 100 : 0, c: key === 'eagle' || key === 'birdie' ? 'var(--flag)' : key === 'par' ? 'var(--chart)' : 'var(--ink2)' }));
+  const distRows = [['Eagle+', 'eagle'], ['Birdie', 'birdie'], ['Par', 'par'], ['Bogey', 'bogey'], ['Double', 'double'], ['Triple+', 'worse']].map(([k, key]) => ({ k, v: A.distN ? A.dist[key] / A.distN * 100 : 0, c: key === 'eagle' || key === 'birdie' ? 'var(--birdie)' : key === 'par' ? 'var(--chart)' : 'var(--flag)' }));
   v.innerHTML = `<div class="spread"><h1>Stats</h1><button class="btn sm" id="qa">+ Past round</button></div>
   <div class="seg" id="range" style="margin-bottom:12px">${[[5, 'Last 5'], [10, 'Last 10'], [20, 'Last 20'], [0, 'All']].map(([n, l]) => `<button data-n="${n}" class="${statsRange === n ? 'on' : ''}">${l}</button>`).join('')}</div>
   <div class="band hero">
