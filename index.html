@@ -354,7 +354,7 @@ const Cloud = {
   },
   status() {
     if (this.authLost) return setSync(this.keyMode ? 'Locked — tap to enter key' : 'Signed out — tap to sign in', 'warn');
-    if (!navigator.onLine) return setSync(this.pending.size ? 'Offline — saved on phone' : 'Offline', 'warn');
+    if (!navigator.onLine || this.offlineStart) return setSync(this.pending.size ? 'Offline — saved on phone' : 'Offline', 'warn');
     if (this.pending.size) return setSync('Saving…');
     setSync('Synced', 'ok');
   },
@@ -365,8 +365,15 @@ const Cloud = {
     catch (e) {
       if (e.auth && ['key_required', 'key_wrong', 'too_many'].includes(e.code)) { this.on = true; this.authLost = true; this.keyMode = true; this.status(); this.bind(); this.askKey(e.code); return true; }
       if (e.auth) { this.on = true; this.authLost = true; this.status(); this.bind(); return true; }
+      // No signal, but this phone already uses the cloud: keep saving on the phone and upload once back online.
+      const prev = this.lsGet('splonk.cloudUser', null);
+      if (!e.noApi && prev) {
+        this.on = true; this.offlineStart = true; this.email = prev; this.keyMode = prev === 'owner';
+        this.pending = new Set(this.lsGet('splonk.pending', [])); this.bind(); this.status(); return true;
+      }
       return false;
     }
+    this.offlineStart = false;
     this.keyMode = me.email === 'owner';
     this.on = true; this.email = me.email;
     this.pending = new Set(this.lsGet('splonk.pending', []));
@@ -432,7 +439,12 @@ const Cloud = {
     clearTimeout(this.timer);
     this.timer = setTimeout(() => this.flush(), debounce ? 900 : 50);
   },
+  async reconnect() {
+    if (this.connecting || !navigator.onLine) return;
+    this.connecting = true; try { await this.connect(); } finally { this.connecting = false; }
+  },
   async flush() {
+    if (this.offlineStart) return this.reconnect();
     if (!this.on || this.flushing || this.authLost || !navigator.onLine) { this.status(); return; }
     this.flushing = true;
     try {
@@ -448,6 +460,7 @@ const Cloud = {
     this.status();
   },
   async pull(full) {
+    if (this.offlineStart) return this.reconnect();
     if (!this.on || this.pulling || this.authLost || !navigator.onLine) return;
     this.pulling = true;
     try {
@@ -1581,6 +1594,11 @@ $('#gear').onclick = () => {
    Boot
    ========================================================= */
 Store.load(); hydrate(); render(); Store.connect();
+
+/* Offline support: keep a copy of the app on the phone (only on the real website, not in previews). */
+if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost') && !/claude|anthropic/.test(location.hostname)) {
+  window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(() => {}));
+}
 </script>
 </body>
 </html>
