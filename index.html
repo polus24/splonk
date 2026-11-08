@@ -98,6 +98,9 @@ label.f textarea{min-height:70px;resize:vertical}
 .holehead .meta{text-align:right;font-size:13px;color:var(--ink2)}
 .stepper{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 0;border-bottom:1px solid var(--line)}
 .stepper:last-child{border-bottom:0}
+#asBar{position:sticky;top:0;z-index:40;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 14px;background:var(--flag);color:#fff;font-size:14px}
+#asBar .btn{background:#fff;color:var(--flag);border-color:#fff}
+.cp-all{display:block;width:100%;margin-top:6px;padding:10px 4px;background:none;border:0;border-top:1px solid var(--line);color:var(--stripeA);font:inherit;font-weight:700;text-align:left;cursor:pointer}
 .gm{display:grid;grid-template-columns:repeat(3,42px);grid-template-rows:repeat(3,42px);gap:5px}
 .gm button{border:1px solid var(--line);background:var(--surface);border-radius:10px;font-size:19px;color:var(--ink2);cursor:pointer;padding:0;line-height:1}
 .gm button.on{background:var(--flag);border-color:var(--flag);color:#fff}
@@ -156,6 +159,7 @@ label.f textarea{min-height:70px;resize:vertical}
 .cp-row{display:flex;align-items:center;gap:10px;width:100%;text-align:left;border:0;background:transparent;padding:11px 8px;border-radius:10px;cursor:pointer}
 .cp-row:hover,.cp-row:focus-visible{background:var(--surface)}
 .cp-row .t{display:block;font-weight:600;font-size:15px}
+.cp-row .grow{flex:1;min-width:0}
 .cp-row b{color:var(--accent)}
 .cp-empty{padding:14px 8px 6px}
 .cp-chosen{display:flex;align-items:center;gap:10px;background:var(--surface2);border-radius:14px;padding:12px 12px 12px 14px}
@@ -333,15 +337,41 @@ const Store = {
    signed in with Cloudflare Access. A copy stays on the phone, changes
    queue while offline and upload when back online.
    ========================================================= */
+function isViewingOther() { return !!(Cloud.self && Cloud.viewing && Cloud.viewing.id !== Cloud.self.id); }
+function profileBar() {
+  let bar = $('#asBar');
+  if (!isViewingOther()) { if (bar) bar.remove(); document.body.classList.remove('as-other'); return; }
+  if (!bar) { bar = document.createElement('div'); bar.id = 'asBar'; document.querySelector('header').after(bar); }
+  bar.innerHTML = `<span>Editing <b>${esc(Cloud.viewing.name)}</b>’s profile</span><button class="btn sm" id="asBack">Back to mine</button>`;
+  document.body.classList.add('as-other');
+  $('#asBack').onclick = () => switchProfile(Cloud.self.id);
+}
+async function switchProfile(id) {
+  if (Cloud.pending.size) { await Cloud.flush(); }
+  if (Cloud.pending.size) { toast('Some changes haven’t uploaded yet. Get signal, then try again.'); return; }
+  try { if (!id || (Cloud.self && id === Cloud.self.id)) localStorage.removeItem('splonk.as'); else localStorage.setItem('splonk.as', id); } catch (e) {}
+  location.hash = '#play'; location.reload();
+}
+async function profilesSheet() {
+  const m = openSheet(`<div class="hd"><h2>Profiles</h2><button class="x" data-close>×</button></div><p class="small muted" style="margin:-4px 0 10px">As an admin you can open anyone’s profile and change their rounds, courses and settings.</p><div id="pfList" class="small muted">Loading…</div>`);
+  try {
+    const { profiles } = await Cloud.api('profiles');
+    const ago = t => { if (!t) return 'No data yet'; const d = Math.floor((Date.now() - t) / 864e5); return 'Last change ' + (d < 1 ? 'today' : d === 1 ? 'yesterday' : d + ' days ago'); };
+    $('#pfList', m.el).className = 'cp-list';
+    $('#pfList', m.el).innerHTML = profiles.map(p => `<button class="cp-row" data-p="${esc(p.id)}"><span class="grow"><span class="t">${esc(p.name)}${p.id === Cloud.self.id ? ' (you)' : ''}${p.admin ? ' · admin' : ''}</span><span class="tiny muted">${p.rounds} round${p.rounds === 1 ? '' : 's'} · ${ago(p.last)}</span></span>${Cloud.viewing && p.id === Cloud.viewing.id ? '<span class="pill">Open</span>' : '<span class="muted">›</span>'}</button>`).join('');
+    $$('[data-p]', m.el).forEach(b => b.onclick = () => { if (Cloud.viewing && b.dataset.p === Cloud.viewing.id) return m.close(); switchProfile(b.dataset.p); });
+  } catch (e) { $('#pfList', m.el).textContent = 'Couldn’t load profiles. Check your signal and try again.'; }
+}
 const Cloud = {
   on: false, email: null, since: 0, pending: new Set(), timer: null, flushing: false, pulling: false, authLost: false,
   lsGet(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
   lsSet(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} },
   savePending() { this.lsSet('splonk.pending', [...this.pending]); },
   key() { try { return localStorage.getItem('splonk.key') || ''; } catch (e) { return ''; } },
+  asId() { try { return localStorage.getItem('splonk.as') || ''; } catch (e) { return ''; } },
   async api(path, opts = {}) {
-    const k = this.key();
-    const res = await fetch('/api/' + path, { credentials: 'same-origin', cache: 'no-store', redirect: 'manual', ...opts, headers: { 'content-type': 'application/json', ...(k ? { 'X-Splonk-Key': k } : {}), ...(opts.headers || {}) } });
+    const k = this.key(), as = this.asId();
+    const res = await fetch('/api/' + path, { credentials: 'same-origin', cache: 'no-store', redirect: 'manual', ...opts, headers: { 'content-type': 'application/json', ...(k ? { 'X-Splonk-Key': k } : {}), ...(as ? { 'X-Splonk-As': as } : {}), ...(opts.headers || {}) } });
     if (res.type === 'opaqueredirect' || res.status === 401 || res.status === 403 || res.status === 429) {
       let code = ''; try { code = (await res.clone().json()).code || ''; } catch (x) {}
       const e = new Error('signed out'); e.auth = true; e.code = code; throw e;
@@ -368,13 +398,17 @@ const Cloud = {
       // No signal, but this phone already uses the cloud: keep saving on the phone and upload once back online.
       const prev = this.lsGet('splonk.cloudUser', null);
       if (!e.noApi && prev) {
-        this.on = true; this.offlineStart = true; this.email = prev; this.keyMode = prev === 'owner';
+        this.on = true; this.offlineStart = true; this.email = prev; const pf = this.lsGet('splonk.profile', {}) || {}; this.self = pf.self || null; this.viewing = pf.viewing || null; this.keyMode = !!this.self || prev === 'owner'; profileBar();
         this.pending = new Set(this.lsGet('splonk.pending', [])); this.bind(); this.status(); return true;
       }
       return false;
     }
     this.offlineStart = false;
-    this.keyMode = me.email === 'owner';
+    this.keyMode = me.mode === 'key' || me.email === 'owner';
+    this.self = me.self || null; this.viewing = me.viewing || null;
+    if (this.asId() && (!this.self || !this.viewing || this.viewing.id === this.self.id)) { try { localStorage.removeItem('splonk.as'); } catch (e) {} }
+    this.lsSet('splonk.profile', { self: this.self, viewing: this.viewing });
+    profileBar();
     this.on = true; this.email = me.email;
     this.pending = new Set(this.lsGet('splonk.pending', []));
     this.bind();
@@ -408,7 +442,7 @@ const Cloud = {
   askKey(why) {
     if (document.querySelector('#keyIn')) return;
     const m = openSheet(`<div class="hd"><h2>Unlock Splonk</h2><button class="x" data-close>×</button></div>
-      <p style="margin-top:0">Enter the key or PIN you saved in Cloudflare as <b>APP_KEY</b>. You only need to do this once on each phone.</p>
+      <p style="margin-top:0">Enter your Splonk PIN. You only need to do this once on each phone.</p>
       ${why === 'key_wrong' ? '<p class="sihint" style="margin-top:0">That didn’t match. Check it and try again.</p>' : why === 'too_many' ? '<p class="sihint" style="margin-top:0">Too many wrong tries. Wait 15 minutes, then try again.</p>' : ''}
       <label class="f">Key or PIN<input id="keyIn" type="password" inputmode="text" autocomplete="current-password" autocapitalize="off" spellcheck="false"></label>
       <button class="btn primary block" id="keyGo">Unlock</button>
@@ -427,7 +461,7 @@ const Cloud = {
   async downloadBackup() {
     try {
       const k = this.key();
-      const res = await fetch('/api/export', { credentials: 'same-origin', cache: 'no-store', headers: k ? { 'X-Splonk-Key': k } : {} });
+      const as = this.asId(); const res = await fetch('/api/export', { credentials: 'same-origin', cache: 'no-store', headers: { ...(k ? { 'X-Splonk-Key': k } : {}), ...(as ? { 'X-Splonk-As': as } : {}) } });
       if (!res.ok) throw new Error('HTTP ' + res.status);
       const blob = await res.blob();
       const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'splonk-backup-' + today() + '.json';
@@ -640,8 +674,22 @@ function searchVenues(q) {
   return { list: all.map(v => ({ v, s: score(v) })).filter(o => o.s >= 0).sort((a, b) => a.s - b.s || a.v.name.localeCompare(b.v.name)).map(o => o.v).slice(0, 8) };
 }
 function teeLine(c) { return `${hasRatings(c) ? `${c.scratch} / ${c.slope}` : 'needs ratings'}${c.len ? ', ' + c.len.toLocaleString() + ' m' : ''}`; }
+function allCoursesSheet(onChoose) {
+  const vs = venueList().slice().sort((a, b) => a.name.localeCompare(b.name));
+  const m = openSheet(`<div class="hd"><h2>All courses</h2><button class="x" data-close>×</button></div>
+    <p class="small muted" style="margin:-4px 0 10px">${vs.length} courses. Tap one to play it.</p>
+    <div class="cp-list">${vs.map(v => `<button class="cp-row" data-v="${v.kind}:${v.id}"><span class="grow"><span class="t">${esc(v.name)}</span>${v.kind === 'mine' ? '<span class="tiny muted">Added by you</span>' : ''}</span><span class="muted">›</span></button>`).join('')}</div>
+    <div class="cp-empty" style="margin-top:14px"><div><b>Can’t see your course?</b></div><div class="tiny muted" style="margin:4px 0 10px">Ask Kristian to add it to the course library.</div><a class="btn sm" data-req href="${courseRequestMail('')}">Ask Kristian to add it</a></div>`);
+  $$('[data-v]', m.el).forEach(b => b.onclick = () => { const [kind, id] = b.dataset.v.split(':'); const v = venueList().find(x => x.kind === kind && x.id === id); m.close(); onChoose(v); });
+  $('[data-req]', m.el).onclick = () => toast('Opening your email…');
+}
 function coursePicker(host, { selectedId, onPick, allowAdd = true }) {
   let mode = selectedId && findCourse(selectedId) ? 'chosen' : 'search', venue = null, q = '';
+  const pickVenue = v => {
+    if (!v) return;
+    if (v.courses.length === 1) { selectedId = v.courses[0].id; mode = 'chosen'; onPick(selectedId); return; }
+    venue = v; mode = 'tees'; draw();
+  };
   const draw = () => {
     const c = selectedId && findCourse(selectedId);
     if (mode === 'chosen' && c) {
@@ -672,12 +720,11 @@ function coursePicker(host, { selectedId, onPick, allowAdd = true }) {
       }
       res.innerHTML = (recent ? '<div class="tiny muted" style="margin:8px 4px 2px">Recently played</div>' : (!q.trim() && !vs.length ? `<div class="tiny muted" style="padding:10px 4px">Start typing to find a course. There are ${LIB_VENUES.length} courses in the library.</div>` : '')) +
         vs.map(v => `<button class="cp-row" data-v="${v.kind}:${v.id}"><span class="grow"><span class="t">${hl(v.name, q)}</span><span class="tiny muted">${esc(v.sub)}</span></span><span class="muted">›</span></button>`).join('');
+      if (!q.trim()) res.insertAdjacentHTML('beforeend', `<button class="cp-all" data-all>See all ${venueList().length} courses ›</button>`);
       $$('[data-v]', res).forEach(b => b.onclick = () => {
-        const [kind, id] = b.dataset.v.split(':'); const v = venueList().find(x => x.kind === kind && x.id === id);
-        if (!v) return;
-        if (v.courses.length === 1) { selectedId = v.courses[0].id; mode = 'chosen'; onPick(selectedId); return; }
-        venue = v; mode = 'tees'; draw();
+        const [kind, id] = b.dataset.v.split(':'); pickVenue(venueList().find(x => x.kind === kind && x.id === id));
       });
+      const al = $('[data-all]', res); if (al) al.onclick = () => allCoursesSheet(pickVenue);
     };
     inp.oninput = () => { q = inp.value; list(); };
     const cn = $('[data-cancel]', host); if (cn) cn.onclick = () => { mode = 'chosen'; draw(); };
@@ -694,10 +741,10 @@ function teeColour(t) { const k = norm(t).split(' ')[0]; return ({ black: '#1b1b
 const COURSE_REQUEST_TO = 'kristian.madaschi@gmail.com';
 function courseRequestMail(name) {
   const who = (S.settings && S.settings.name) || '';
-  const subject = `Splonk course request: ${name}`;
+  const subject = name ? `Splonk course request: ${name}` : 'Splonk course request';
   const body = `Hi Kristian,
 
-Could you please add ${name} to the Splonk course library?
+Could you please add ${name || 'a course'} to the Splonk course library?
 
 Course: ${name}
 Town or suburb:
@@ -1574,14 +1621,21 @@ $('#gear').onclick = () => {
     <label class="f">Official GA Handicap (from the Golf Australia app)<input id="gOff" type="number" step="0.1" value="${s.officialHcp ?? ''}" placeholder="optional"></label>
     <label class="check"><input type="checkbox" id="gUse" ${s.useOfficial ? 'checked' : ''}> Use my official handicap for Daily Handicap and points</label>
     <p class="tiny muted">Until you've entered about 20 rounds here, your official handicap is more accurate than the calculated one. Leave this on until then.</p>
-    ${Cloud.on && Cloud.email ? `<h3 style="margin-top:18px">Account</h3><p class="small" style="margin:0 0 8px">${Cloud.keyMode ? 'Unlocked with your private key.' : `Signed in as <b>${esc(Cloud.email)}</b>.`} Your rounds, courses and bag are saved to the cloud, with a copy on this phone for when there's no signal.</p><div class="row wrap" style="margin-bottom:6px"><button class="btn sm" id="gDl">Download backup file</button>${Cloud.keyMode ? '<button class="btn sm ghost" id="gLock">Lock this phone</button>' : ''}</div>` : ''}
+    ${Cloud.on && Cloud.email ? `<h3 style="margin-top:18px">Account</h3><p class="small" style="margin:0 0 8px">${Cloud.self ? (isViewingOther() ? `You’re editing <b>${esc(Cloud.viewing.name)}</b>’s profile.` : `Profile: <b>${esc(Cloud.self.name)}</b>${Cloud.self.admin ? ' (admin)' : ''}.`) : Cloud.keyMode ? 'Unlocked with your private key.' : `Signed in as <b>${esc(Cloud.email)}</b>.`} Rounds, courses and bag are saved to the cloud, with a copy on this phone for when there's no signal.</p><div class="row wrap" style="margin-bottom:6px">${Cloud.self && Cloud.self.admin ? '<button class="btn sm primary" id="gProf">Open someone’s profile</button>' : ''}<button class="btn sm" id="gDl">Download backup file</button>${Cloud.keyMode ? '<button class="btn sm ghost" id="gLock">Switch user</button>' : ''}</div>` : ''}
     <h3 style="margin-top:18px">Backup</h3>
     <div class="row wrap"><button class="btn sm" id="gCopy">Copy backup</button><button class="btn sm" id="gImp">Restore from backup</button></div>
     <p class="tiny muted">Copy backup copies everything except swing videos saved on this device.</p>
     <button class="btn primary block" id="gSave" style="margin-top:12px">Save</button>`);
   const el = m.el;
   const dl = $('#gDl', el); if (dl) dl.onclick = () => Cloud.downloadBackup();
-  const lk = $('#gLock', el); if (lk) lk.onclick = async () => { if (await confirmBox('Remove the key from this phone? Your data stays in the cloud; you\'ll need the key to unlock again.', { ok: 'Lock' })) { try { localStorage.removeItem('splonk.key'); } catch (e) {} location.reload(); } };
+  const pf = $('#gProf', el); if (pf) pf.onclick = () => { m.close(); profilesSheet(); };
+  const lk = $('#gLock', el); if (lk) lk.onclick = async () => {
+    if (!(await confirmBox('Lock Splonk on this phone? Everything is saved in the cloud. To open it again, enter a PIN: yours, or someone else’s to use their profile.', { ok: 'Lock' }))) return;
+    if (Cloud.pending.size) await Cloud.flush();
+    if (Cloud.pending.size) { toast('Some changes haven’t uploaded yet. Get signal, then try again.'); return; }
+    try { localStorage.removeItem('splonk.key'); localStorage.removeItem('splonk.as'); } catch (e) {}
+    location.reload();
+  };
   $('#gSave', el).onclick = () => { S.settings = { ...s, name: $('#gName', el).value.trim(), gender: $('#gG', el).value, officialHcp: num($('#gOff', el).value), useOfficial: $('#gUse', el).checked }; saveSettings(); m.close(); render(); };
   $('#gCopy', el).onclick = async () => { try { await navigator.clipboard.writeText(JSON.stringify(Store.docs)); toast('Backup copied — paste it somewhere safe'); } catch (e) { toast('Couldn\'t copy in this view'); } };
   $('#gImp', el).onclick = () => {
