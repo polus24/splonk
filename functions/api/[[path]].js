@@ -6,8 +6,14 @@
 // Needs (Pages project → Settings):
 //   D1 binding:  DB → your "splonk" D1 database
 //   Then ONE of these ways to lock it:
-//   - Single user:  secret APP_KEY → a private key or PIN (4+ characters) you enter once in the app.
-//                   After 10 wrong tries from one connection, tries are refused for 15 minutes.
+//   - PINs:  secret APP_KEY  → the owner's PIN (4+ characters). The owner is the admin and can open
+//                              and edit everyone's profile from Settings.
+//            secret PROFILES → optional, more people: "PIN:Name" pairs separated by commas,
+//                              e.g.  5678:Dad, 9012:Marty   (add ":admin" to make someone an admin too).
+//            Each PIN has its own separate data. Don't rename someone once they have data:
+//            the name is how their data is found. Changing a PIN is fine.
+//            OWNER_NAME → optional, the owner's name shown in the profile list (default "Me").
+//            After 10 wrong tries from one connection, tries are refused for 15 minutes.
 //   - Several users (Cloudflare Access): TEAM_DOMAIN → https://<team>.cloudflareaccess.com
 //                                        POLICY_AUD  → the Access application's AUD tag
 
@@ -72,10 +78,33 @@ const MAX_TRIES = 10, LOCK_MS = 15 * 60 * 1000;
 async function triesTable(env) {
   await env.DB.prepare('CREATE TABLE IF NOT EXISTS auth_fails (ip TEXT PRIMARY KEY, count INTEGER NOT NULL, first_at INTEGER NOT NULL)').run();
 }
+// Everyone who can unlock with a PIN. The owner keeps the id "owner" so existing data stays put.
+function pinProfiles(env) {
+  const appKey = String(env.APP_KEY || '').trim();
+  if (!appKey) return null;
+  const list = [{ id: 'owner', name: String(env.OWNER_NAME || '').trim() || 'Me', pin: appKey, admin: true }];
+  const raw = String(env.PROFILES || '').trim();
+  if (raw) for (const part of raw.split(/[,\n;]+/)) {
+    const bits = part.split(':').map(x => x.trim());
+    if (!bits[0]) continue;
+    if (bits.length < 2 || !bits[1]) throw Object.assign(new Error(`PROFILES entry "${part.trim()}" needs a PIN and a name, like 5678:Dad`), { status: 500 });
+    const slug = bits[1].toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+    if (!slug) throw Object.assign(new Error(`PROFILES name "${bits[1]}" needs letters or numbers`), { status: 500 });
+    list.push({ id: 'p_' + slug, name: bits[1], pin: bits[0], admin: (bits[2] || '').toLowerCase() === 'admin' });
+  }
+  for (const p of list) if (p.pin.length < 4) throw Object.assign(new Error(`The PIN for ${p.name} is too short: use at least 4 characters.`), { status: 500 });
+  const pins = new Set(), ids = new Set();
+  for (const p of list) {
+    if (pins.has(p.pin)) throw Object.assign(new Error('Two people have the same PIN: every PIN must be different.'), { status: 500 });
+    if (ids.has(p.id)) throw Object.assign(new Error(`Two people are both called "${p.name}": every name must be different.`), { status: 500 });
+    pins.add(p.pin); ids.add(p.id);
+  }
+  return list;
+}
 async function whoIs(request, env) {
   const appKey = String(env.APP_KEY || '').trim();
   if (appKey) {
-    if (appKey.length < 4) return { error: 'APP_KEY is too short: use at least 4 characters.', status: 500 };
+    const people = pinProfiles(env);
     const given = (request.headers.get('X-Splonk-Key') || '').trim();
     if (!given) return { error: 'Key required', code: 'key_required', status: 401 };
     if (!env.DB) return { error: 'Server not set up yet: add the D1 binding named DB.', status: 500 };
@@ -85,13 +114,19 @@ async function whoIs(request, env) {
     const row = (await env.DB.prepare('SELECT count, first_at FROM auth_fails WHERE ip = ?1').bind(ip).all()).results[0];
     const fresh = row && now - row.first_at < LOCK_MS;
     if (fresh && row.count >= MAX_TRIES) return { error: 'Too many wrong tries. Wait 15 minutes and try again.', code: 'too_many', status: 429 };
-    if (!sameText(given, appKey)) {
+    let match = null;
+    for (const p of people) if (sameText(given, p.pin) && !match) match = p;
+    if (!match) {
       if (fresh) await env.DB.prepare('UPDATE auth_fails SET count = count + 1 WHERE ip = ?1').bind(ip).run();
       else await env.DB.prepare('INSERT INTO auth_fails (ip, count, first_at) VALUES (?1, 1, ?2) ON CONFLICT(ip) DO UPDATE SET count = 1, first_at = excluded.first_at').bind(ip, now).run();
       return { error: 'Wrong key', code: 'key_wrong', status: 401 };
     }
     if (row) await env.DB.prepare('DELETE FROM auth_fails WHERE ip = ?1').bind(ip).run();
-    return { email: 'owner' };
+    // An admin can open someone else's profile; everyone else only ever gets their own.
+    let viewing = match;
+    const as = (request.headers.get('X-Splonk-As') || '').trim();
+    if (as && match.admin) viewing = people.find(p => p.id === as) || match;
+    return { email: viewing.id, key: true, self: match, viewing, people };
   }
   if (!String(env.TEAM_DOMAIN || '').trim() && !String(env.POLICY_AUD || '').trim()) {
     const seen = Object.keys(env).filter(k => k !== 'ASSETS').sort();
@@ -119,7 +154,16 @@ export async function onRequest(context) {
     const method = request.method;
     const url = new URL(request.url);
 
-    if (res === 'me' && method === 'GET') return json({ email: user });
+    const pub = p => p && { id: p.id, name: p.name, admin: !!p.admin };
+    if (res === 'me' && method === 'GET') return json(who.key ? { email: user, mode: 'key', self: pub(who.self), viewing: pub(who.viewing) } : { email: user });
+
+    // Admins: everyone's profile, with how much data they have and when it last changed.
+    if (res === 'profiles' && method === 'GET') {
+      if (!who.key || !who.self.admin) return json({ error: 'Only an admin can see other profiles' }, 403);
+      const { results } = await env.DB.prepare("SELECT user, SUM(CASE WHEN key LIKE 'r\\_%' ESCAPE '\\' AND deleted = 0 THEN 1 ELSE 0 END) AS rounds, MAX(updated_at) AS last FROM docs GROUP BY user").all();
+      const by = Object.fromEntries(results.map(r => [r.user, r]));
+      return json({ profiles: who.people.map(p => ({ ...pub(p), rounds: by[p.id] ? Number(by[p.id].rounds) || 0 : 0, last: by[p.id] ? by[p.id].last : null })) });
+    }
 
     if (res === 'docs' && !key && method === 'GET') {
       const since = Math.max(0, Number(url.searchParams.get('since')) || 0);
@@ -171,7 +215,8 @@ export async function onRequest(context) {
       const { results } = await env.DB.prepare('SELECT key, data FROM docs WHERE user = ?1 AND deleted = 0').bind(user).all();
       const out = {}; results.forEach(r => { out[r.key] = JSON.parse(r.data); });
       const day = new Date().toISOString().slice(0, 10);
-      return json(out, 200, { 'content-disposition': `attachment; filename="splonk-backup-${day}.json"` });
+      const who2 = who.key && who.viewing.id !== 'owner' ? '-' + who.viewing.id.replace(/^p_/, '') : '';
+      return json(out, 200, { 'content-disposition': `attachment; filename="splonk-backup${who2}-${day}.json"` });
     }
 
     return json({ error: 'Not found' }, 404);
